@@ -37,7 +37,13 @@ CREATE TABLE IF NOT EXISTS daily_usage (
 
 class Database:
     def __init__(self, path: Path = DB_PATH) -> None:
-        self._conn = sqlite3.connect(str(path))
+        # timeout = how long to wait for a lock before raising "database is
+        # locked". WAL mode lets readers and a writer coexist and shortens the
+        # window a write holds the lock — both guard against transient
+        # contention (e.g. a second instance briefly overlapping at shutdown).
+        self._conn = sqlite3.connect(str(path), timeout=30.0)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
 
