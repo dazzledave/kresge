@@ -17,6 +17,9 @@ Built with Python + PyQt6 + pyqtgraph + psutil.
 - **Alerts & data caps** — monthly cap with early-warning threshold, sustained
   high-usage alerts, and per-process bandwidth-hog alerts, delivered as native
   Windows tray notifications.
+- **Hotspot monitor** — see devices connected to your Windows Mobile Hotspot
+  (MAC, IP, vendor, online status) and their per-device upload/download usage.
+  (Usage requires admin + Npcap — see [Hotspot monitoring](#hotspot-monitoring).)
 - **Tray + dashboard** — lives in the system tray showing live speed in its
   tooltip; double-click (or use the menu) to open the full dashboard.
 
@@ -76,6 +79,30 @@ For byte-accurate per-process numbers, an Administrator
 isolated behind `ProcessMonitor` in `kresge/process_monitor.py`, so an exact
 ETW backend can be added later without changing the rest of the app.
 
+## Hotspot monitoring
+
+The **Hotspot** tab shows devices connected to the Windows Mobile Hotspot. It
+works in two tiers:
+
+- **Tier 1 — presence (always available).** Devices are discovered from the
+  ICS neighbor (ARP) table on the hotspot subnet (`192.168.137.0/24`), showing
+  MAC, IP, online status, and a best-effort vendor name from the MAC's OUI.
+  No admin or drivers needed.
+- **Tier 2 — per-device usage (opt-in).** Because your PC NATs all hotspot
+  traffic, Windows exposes no per-client byte counters. Kresge measures usage
+  by sniffing the hotspot interface with [scapy](https://scapy.net) and
+  attributing bytes to each client IP. This requires:
+  1. Installing the **[Npcap](https://npcap.com)** driver, and
+  2. Running Kresge **as Administrator**.
+
+  Without both, the tab automatically falls back to Tier 1 (device list only)
+  and the banner explains what's missing. The sniffer is isolated in
+  `kresge/hotspot_capture.py`, so usage is never required for presence to work.
+
+Per-device cumulative totals are persisted to the database, so usage survives
+restarts. Phones using **randomized (private) MACs** are labelled as such, since
+their OUI can't be mapped to a vendor.
+
 ## Project layout
 
 ```
@@ -84,11 +111,13 @@ kresge/
   config.py              Settings + byte/rate formatting
   sampler.py             Global throughput from psutil counters
   process_monitor.py     Per-process bandwidth estimation
-  database.py            SQLite history (minute + daily granularity)
+  hotspot_monitor.py     Hotspot device presence + usage orchestration
+  hotspot_capture.py     Per-device packet capture (scapy/Npcap, opt-in)
+  database.py            SQLite history (minute + daily) + hotspot devices
   alerts.py              Cap / high-usage / hog alert rules
   engine.py              Timer-driven engine; emits Qt signals
   ui/
-    dashboard.py         Live charts, tables, history, settings
+    dashboard.py         Live charts, tables, history, hotspot, settings
     tray.py              System-tray icon + notifications
     app.py               Application bootstrap
     icons.py             Programmatically drawn app icon
