@@ -11,10 +11,10 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QMainWindow, QProgressBar, QPushButton,
-    QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
-    QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QDoubleSpinBox, QFormLayout, QFrame, QGridLayout,
+    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QProgressBar,
+    QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ..config import Settings, format_bytes, format_rate
@@ -25,6 +25,73 @@ from .icons import make_icon
 
 DOWN_COLOR = "#2ecc71"
 UP_COLOR = "#3498db"
+ACCENT = "#5c7cff"
+
+# Stylesheet for the History tab. Scoped via object names so it doesn't leak
+# into the other tabs.
+HISTORY_QSS = f"""
+QFrame#histCard {{
+    background: #252539;
+    border: 1px solid #34344c;
+    border-radius: 10px;
+}}
+QLabel#cardTitle {{ color: #8c8ca6; font-size: 11px; font-weight: 600; }}
+QLabel#cardValue {{ color: #f0f0f8; font-size: 23px; font-weight: 700; }}
+QLabel#cardSub   {{ font-size: 12px; }}
+QLabel#histLegend {{ font-size: 12px; }}
+QPushButton#segBtn {{
+    background: #252539; color: #b0b0c8; border: 1px solid #34344c;
+    padding: 6px 20px; font-weight: 600;
+}}
+QPushButton#segBtn:hover {{ background: #2e2e46; }}
+QPushButton#segBtn:checked {{
+    background: {ACCENT}; color: #ffffff; border-color: {ACCENT};
+}}
+QProgressBar#capBar {{
+    border: 1px solid #34344c; border-radius: 8px; background: #252539;
+    text-align: center; color: #e8e8f0; min-height: 22px;
+}}
+QPushButton#refreshBtn {{
+    background: #252539; color: #b0b0c8; border: 1px solid #34344c;
+    border-radius: 6px; padding: 6px 16px;
+}}
+QPushButton#refreshBtn:hover {{ background: #2e2e46; }}
+"""
+
+
+class _ByteAxisItem(pg.AxisItem):
+    """Y-axis that prints human-readable byte sizes instead of raw counts."""
+
+    def tickStrings(self, values, scale, spacing):  # noqa: N802 (pyqtgraph API)
+        return [format_bytes(max(v, 0)) for v in values]
+
+
+class _HistoryCard(QFrame):
+    """A summary tile: small title, big value, and a colored up/down sub-line."""
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        self.setObjectName("histCard")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(2)
+        self.title = QLabel(title)
+        self.title.setObjectName("cardTitle")
+        self.value = QLabel("—")
+        self.value.setObjectName("cardValue")
+        self.sub = QLabel("")
+        self.sub.setObjectName("cardSub")
+        layout.addWidget(self.title)
+        layout.addWidget(self.value)
+        layout.addWidget(self.sub)
+
+    def update_values(self, sent: int, recv: int) -> None:
+        self.value.setText(format_bytes(sent + recv))
+        self.sub.setText(
+            f"<span style='color:{DOWN_COLOR}'>&#8595; {format_bytes(recv)}</span>"
+            f"&nbsp;&nbsp;&nbsp;"
+            f"<span style='color:{UP_COLOR}'>&#8593; {format_bytes(sent)}</span>"
+        )
 
 
 class _StatCard(QGroupBox):
@@ -127,41 +194,89 @@ class DashboardWindow(QMainWindow):
 
     def _build_history_tab(self) -> QWidget:
         w = QWidget()
+        w.setStyleSheet(HISTORY_QSS)
         layout = QVBoxLayout(w)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
 
-        self.month_label = QLabel("This month: —")
-        self.month_label.setStyleSheet("font-size: 16px; font-weight: 600;")
-        layout.addWidget(self.month_label)
+        # Summary cards: this month, all-time, and the selected-period total.
+        cards = QHBoxLayout()
+        cards.setSpacing(12)
+        self.card_month = _HistoryCard("THIS MONTH")
+        self.card_total = _HistoryCard("ALL-TIME")
+        self.card_period = _HistoryCard("SELECTED PERIOD")
+        cards.addWidget(self.card_month)
+        cards.addWidget(self.card_period)
+        cards.addWidget(self.card_total)
+        layout.addLayout(cards)
 
+        # Monthly data-cap progress (only shown when a cap is configured).
         self.cap_bar = QProgressBar()
-        self.cap_bar.setFormat("%p% of monthly cap")
+        self.cap_bar.setObjectName("capBar")
         self.cap_bar.setVisible(False)
         layout.addWidget(self.cap_bar)
 
-        self.total_label = QLabel("All-time: —")
-        self.total_label.setStyleSheet("color: #888;")
-        layout.addWidget(self.total_label)
+        # Toolbar: segmented Day/Week/Month toggle + chart legend.
+        toolbar = QHBoxLayout()
+        self._gran_group = QButtonGroup(w)
+        self._gran_group.setExclusive(True)
+        for label in ("Day", "Week", "Month"):
+            btn = QPushButton(label)
+            btn.setObjectName("segBtn")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._gran_group.addButton(btn)
+            toolbar.addWidget(btn)
+            if label == "Day":
+                btn.setChecked(True)
+        self._gran_group.buttonClicked.connect(lambda _: self.refresh_history())
+        toolbar.addStretch(1)
+        legend = QLabel(
+            f"<span style='color:{DOWN_COLOR}'>&#9632; Download</span>"
+            f"&nbsp;&nbsp;&nbsp;"
+            f"<span style='color:{UP_COLOR}'>&#9632; Upload</span>"
+        )
+        legend.setObjectName("histLegend")
+        toolbar.addWidget(legend)
+        layout.addLayout(toolbar)
 
-        # Group-by filter: Day / Week / Month
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Group by:"))
-        self.gran_combo = QComboBox()
-        self.gran_combo.addItems(["Day", "Week", "Month"])
-        self.gran_combo.currentTextChanged.connect(lambda _: self.refresh_history())
-        controls.addWidget(self.gran_combo)
-        controls.addStretch(1)
-        layout.addLayout(controls)
-
-        self.hist_plot = pg.PlotWidget()
+        # Usage chart with a human-readable byte axis.
+        self.hist_plot = pg.PlotWidget(
+            axisItems={"left": _ByteAxisItem(orientation="left")}
+        )
         self.hist_plot.setBackground("#1e1e2e")
-        self.hist_plot.showGrid(x=False, y=True, alpha=0.2)
-        self.hist_plot.setLabel("left", "Usage", units="B")
+        self.hist_plot.showGrid(x=False, y=True, alpha=0.15)
+        self.hist_plot.setMouseEnabled(x=False, y=False)
+        self.hist_plot.setMenuEnabled(False)
+        self.hist_plot.hideButtons()
+        for name in ("left", "bottom"):
+            ax = self.hist_plot.getAxis(name)
+            ax.setPen("#44445c")
+            ax.setTextPen("#9090a8")
         layout.addWidget(self.hist_plot, stretch=1)
 
-        refresh = QPushButton("Refresh history")
+        # Empty-state placeholder, shown when there's no data yet.
+        self.hist_placeholder = QLabel(
+            "No history yet.\nUsage will appear here as you use the network."
+        )
+        self.hist_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hist_placeholder.setStyleSheet("color: #6c6c84; font-size: 14px;")
+        self.hist_placeholder.setVisible(False)
+        layout.addWidget(self.hist_placeholder, stretch=1)
+
+        bottom = QHBoxLayout()
+        bottom.addStretch(1)
+        refresh = QPushButton("Refresh")
+        refresh.setObjectName("refreshBtn")
+        refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh.clicked.connect(self.refresh_history)
-        layout.addWidget(refresh, alignment=Qt.AlignmentFlag.AlignLeft)
+        bottom.addWidget(refresh)
+        layout.addLayout(bottom)
         return w
+
+    def _current_granularity(self) -> str:
+        btn = self._gran_group.checkedButton()
+        return btn.text() if btn else "Day"
 
     # How each filter maps to a DB granularity, bucket count, and chart title.
     _HIST_VIEWS = {
@@ -171,44 +286,61 @@ class DashboardWindow(QMainWindow):
     }
 
     def refresh_history(self) -> None:
-        # Monthly total + cap progress
+        # Summary cards: month + all-time.
         m_sent, m_recv = self.engine.db.month_usage()
-        m_total = m_sent + m_recv
-        self.month_label.setText(
-            f"This month: {format_bytes(m_total)}  "
-            f"(↓ {format_bytes(m_recv)} / ↑ {format_bytes(m_sent)})"
-        )
+        self.card_month.update_values(m_sent, m_recv)
+        t_sent, t_recv = self.engine.db.total_usage()
+        self.card_total.update_values(t_sent, t_recv)
+
+        # Monthly data-cap progress, colored by how close to the cap we are.
         if self.settings.monthly_cap_gb > 0:
             cap = self.settings.monthly_cap_gb * 1024 ** 3
+            m_total = m_sent + m_recv
             pct = min(int(m_total / cap * 100), 100) if cap else 0
-            self.cap_bar.setVisible(True)
+            color = "#2ecc71" if pct < 75 else "#f1c40f" if pct < 90 else "#e74c3c"
+            self.cap_bar.setStyleSheet(
+                f"QProgressBar#capBar::chunk {{ border-radius: 7px; background: {color}; }}"
+            )
+            self.cap_bar.setFormat(
+                f"  {format_bytes(m_total)} of {self.settings.monthly_cap_gb:g} GB "
+                f"monthly cap  ({pct}%)"
+            )
             self.cap_bar.setValue(pct)
+            self.cap_bar.setVisible(True)
         else:
             self.cap_bar.setVisible(False)
 
-        t_sent, t_recv = self.engine.db.total_usage()
-        self.total_label.setText(
-            f"All-time: {format_bytes(t_sent + t_recv)}  "
-            f"(↓ {format_bytes(t_recv)} / ↑ {format_bytes(t_sent)})"
-        )
-
         # Usage bar chart (download + upload grouped), bucketed by the filter.
-        granularity, limit, title = self._HIST_VIEWS[self.gran_combo.currentText()]
+        granularity, limit, title = self._HIST_VIEWS[self._current_granularity()]
         rows = self.engine.db.usage_buckets(granularity, limit)
-        self.hist_plot.setTitle(title)
+
+        # Selected-period card + section title.
+        p_sent = sum(r[1] for r in rows)
+        p_recv = sum(r[2] for r in rows)
+        self.card_period.title.setText(title.upper())
+        self.card_period.update_values(p_sent, p_recv)
+
         self.hist_plot.clear()
-        if rows:
+        has_data = bool(rows)
+        self.hist_plot.setVisible(has_data)
+        self.hist_placeholder.setVisible(not has_data)
+        if has_data:
             xs = list(range(len(rows)))
             sent = [r[1] for r in rows]
             recv = [r[2] for r in rows]
             self.hist_plot.addItem(pg.BarGraphItem(
-                x=[x - 0.2 for x in xs], height=recv, width=0.4, brush=DOWN_COLOR
+                x=[x - 0.2 for x in xs], height=recv, width=0.38,
+                brush=DOWN_COLOR, pen=None,
             ))
             self.hist_plot.addItem(pg.BarGraphItem(
-                x=[x + 0.2 for x in xs], height=sent, width=0.4, brush=UP_COLOR
+                x=[x + 0.2 for x in xs], height=sent, width=0.38,
+                brush=UP_COLOR, pen=None,
             ))
-            ax = self.hist_plot.getAxis("bottom")
-            ax.setTicks([[(i, rows[i][0]) for i in xs]])
+            # Thin out x labels when crowded so they stay legible.
+            step = max(1, len(rows) // 12)
+            ticks = [(i, rows[i][0]) for i in xs if i % step == 0]
+            self.hist_plot.getAxis("bottom").setTicks([ticks])
+            self.hist_plot.setXRange(-0.6, len(rows) - 0.4, padding=0)
 
     # -- Settings tab -------------------------------------------------------
 
