@@ -3,7 +3,8 @@ psutil>=5.9.0          # cross-platform network/process stats
 PyQt6>=6.6.0           # GUI framework (dashboard + tray)
 pyqtgraph>=0.13.3      # fast live plotting for throughput charts
 
-# Hotspot per-device usage (Tier 2 packet capture)
+# Hotspot device list + per-device usage
+winsdk>=1.0.0          # WinRT: exact connected-client list + device names
 scapy>=2.5.0           # packet sniffing for per-device hotspot usage
 # NOTE: scapy capture also requires the Npcap driver (https://npcap.com) and
 # running Kresge as Administrator. Without them, the Hotspot tab still works in
