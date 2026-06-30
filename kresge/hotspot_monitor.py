@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 
@@ -110,10 +111,21 @@ class HotspotMonitor:
 
         self._devices: dict[str, HotspotDevice] = {}   # keyed by MAC
         self._ip_to_mac: dict[str, str] = {}
-        self._last_refresh = 0.0
         self._last_persist = 0.0
 
+        # The neighbor table is read by spawning PowerShell, which is too slow to
+        # do on the UI thread. A daemon thread refreshes this snapshot in the
+        # background and sample() (UI thread) just reads it — never blocking.
+        self._lock = threading.Lock()
+        self._neighbor_snapshot: list[tuple[str, str]] = []
+        self._poll_stop = threading.Event()
+
         self._load_persisted()
+
+        self._poll_thread = threading.Thread(
+            target=self._poll_loop, name="hotspot-neighbors", daemon=True
+        )
+        self._poll_thread.start()
 
     # -- persistence --------------------------------------------------------
 
@@ -180,19 +192,38 @@ class HotspotMonitor:
             devices.append((ip, mac))
         return devices
 
-    def _refresh_presence(self, now: float) -> None:
-        self._last_refresh = now
-        for ip, mac in self._read_neighbors():
+    def _poll_loop(self) -> None:
+        """Background: refresh the neighbor snapshot off the UI thread."""
+        while not self._poll_stop.is_set():
+            try:
+                snapshot = self._read_neighbors() if self.is_active() else []
+            except Exception:
+                snapshot = []
+            with self._lock:
+                self._neighbor_snapshot = snapshot
+            # Sleep, but wake immediately on shutdown.
+            self._poll_stop.wait(self._refresh_interval)
+
+    def _consume_neighbors(self, now: float) -> None:
+        """Fold the latest background snapshot into the device map (UI thread).
+
+        Cheap and non-blocking. Devices currently present have their last_seen
+        refreshed so presence-only mode keeps showing them as connected.
+        """
+        with self._lock:
+            snapshot = list(self._neighbor_snapshot)
+        for ip, mac in snapshot:
             self._ip_to_mac[ip] = mac
             dev = self._devices.get(mac)
             if dev is None:
-                dev = HotspotDevice(
+                self._devices[mac] = HotspotDevice(
                     mac=mac, ip=ip, vendor=lookup_vendor(mac), name=None,
                     online=True, first_seen=now, last_seen=now,
                 )
-                self._devices[mac] = dev
             else:
                 dev.ip = ip
+                dev.last_seen = now      # still present in the neighbor table
+                dev.online = True
                 if not dev.first_seen:
                     dev.first_seen = now
 
@@ -220,13 +251,8 @@ class HotspotMonitor:
 
         drained = self.capture.drain() if self.capture_ok else {}
 
-        # Refresh presence on its cadence, or immediately if traffic appears for
-        # an IP we don't yet have a MAC for.
-        need_refresh = now - self._last_refresh >= self._refresh_interval
-        if not need_refresh and any(ip not in self._ip_to_mac for ip in drained):
-            need_refresh = True
-        if need_refresh:
-            self._refresh_presence(now)
+        # Fold in the latest neighbor snapshot (refreshed off-thread).
+        self._consume_neighbors(now)
 
         # Reset live rates; fold in this interval's captured bytes.
         for dev in self._devices.values():
@@ -263,6 +289,8 @@ class HotspotMonitor:
         )
 
     def shutdown(self) -> None:
+        self._poll_stop.set()
+        self._poll_thread.join(timeout=2.0)
         self.capture.stop()
         for dev in self._devices.values():
             if dev.last_seen:
