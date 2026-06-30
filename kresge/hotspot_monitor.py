@@ -23,24 +23,14 @@ import psutil
 
 from .database import Database
 from .hotspot_capture import DEFAULT_HOST_IP, HotspotCapture, is_admin
+from .tethering_clients import TetheringClient, read_clients
 
-# A device is considered offline if it has neither sent traffic nor appeared in
-# the neighbor table within this many seconds.
+# In ARP-fallback mode (no WinRT), a device is considered offline if it hasn't
+# appeared in the neighbor table within this many seconds. In WinRT mode the
+# connected set is authoritative, so this isn't used.
 OFFLINE_AFTER_S = 60.0
 
 _CREATE_NO_WINDOW = 0x08000000  # don't flash a console when calling PowerShell
-
-# Small built-in OUI → vendor map for common consumer devices. Best-effort; a
-# miss just yields a generic label. Keys are the first 3 MAC octets, upper-case.
-_OUI: dict[str, str] = {
-    "A4:38:CC": "Apple", "AC:92:32": "Apple", "F0:18:98": "Apple",
-    "3C:5A:B4": "Google", "DA:A1:19": "Google",
-    "AC:5F:3E": "Samsung", "B4:3A:28": "Samsung",
-    "00:1A:11": "Google", "F8:E0:79": "Motorola",
-    "00:15:5D": "Microsoft (Hyper-V)", "00:50:F2": "Microsoft",
-    "EC:B5:FA": "Xiaomi", "28:6C:07": "Xiaomi",
-    "00:E0:4C": "Realtek", "08:00:27": "VirtualBox",
-}
 
 
 @dataclass
@@ -48,14 +38,19 @@ class HotspotDevice:
     mac: str
     ip: str
     vendor: str
-    name: str | None
+    name: str | None            # user-assigned custom name (persisted)
     online: bool
+    auto_name: str | None = None  # device-reported host name (live, not persisted)
     sent_rate: float = 0.0      # bytes/sec uploaded by the device (live)
     recv_rate: float = 0.0      # bytes/sec downloaded to the device (live)
     sent_total: int = 0         # cumulative bytes uploaded
     recv_total: int = 0         # cumulative bytes downloaded
     first_seen: float = 0.0
     last_seen: float = 0.0
+
+    def label(self) -> str:
+        """What to show in the UI: custom name > reported name > fallback."""
+        return self.name or self.auto_name or "Unknown device"
 
 
 def normalize_mac(mac: str) -> str:
@@ -64,7 +59,7 @@ def normalize_mac(mac: str) -> str:
 
 
 def lookup_vendor(mac: str) -> str:
-    """Best-effort vendor name from a MAC address."""
+    """Vendor name from a MAC via the IEEE OUI registry (scapy's bundled DB)."""
     mac = normalize_mac(mac)
     parts = mac.split(":")
     if len(parts) < 3:
@@ -76,9 +71,6 @@ def lookup_vendor(mac: str) -> str:
     except ValueError:
         return "Unknown"
     oui = ":".join(parts[:3])
-    if oui in _OUI:
-        return _OUI[oui]
-    # Fall back to scapy's bundled manufacturer DB if it's available.
     try:
         from scapy.all import conf
         manuf = getattr(conf, "manufdb", None)
@@ -113,11 +105,14 @@ class HotspotMonitor:
         self._ip_to_mac: dict[str, str] = {}
         self._last_persist = 0.0
 
-        # The neighbor table is read by spawning PowerShell, which is too slow to
-        # do on the UI thread. A daemon thread refreshes this snapshot in the
+        # Client discovery (WinRT call or PowerShell ARP read) is too slow for
+        # the UI thread, so a daemon thread refreshes this snapshot in the
         # background and sample() (UI thread) just reads it — never blocking.
+        # `authoritative` is True when the snapshot came from the WinRT tethering
+        # API (an exact connected-device list) vs the ARP fallback.
         self._lock = threading.Lock()
-        self._neighbor_snapshot: list[tuple[str, str]] = []
+        self._snapshot: list[TetheringClient] = []
+        self._authoritative = False
         self._poll_stop = threading.Event()
 
         self._load_persisted()
@@ -193,39 +188,68 @@ class HotspotMonitor:
         return devices
 
     def _poll_loop(self) -> None:
-        """Background: refresh the neighbor snapshot off the UI thread."""
+        """Background: refresh the client snapshot off the UI thread.
+
+        Prefers the WinRT tethering API (exact connected list + names); falls
+        back to the ARP neighbor table if WinRT is unavailable.
+        """
         while not self._poll_stop.is_set():
+            snapshot: list[TetheringClient] = []
+            authoritative = True
             try:
-                snapshot = self._read_neighbors() if self.is_active() else []
+                if self.is_active():
+                    clients = read_clients(self._prefix)
+                    if clients is not None:
+                        snapshot = clients
+                    else:
+                        # Fallback: ARP gives MAC + IP but no names.
+                        authoritative = False
+                        snapshot = [
+                            TetheringClient(mac=mac, ip=ip, name=None)
+                            for ip, mac in self._read_neighbors()
+                        ]
             except Exception:
-                snapshot = []
+                snapshot, authoritative = [], True
             with self._lock:
-                self._neighbor_snapshot = snapshot
+                self._snapshot = snapshot
+                self._authoritative = authoritative
             # Sleep, but wake immediately on shutdown.
             self._poll_stop.wait(self._refresh_interval)
 
-    def _consume_neighbors(self, now: float) -> None:
+    def _consume_snapshot(self, now: float) -> tuple[set[str], bool]:
         """Fold the latest background snapshot into the device map (UI thread).
 
-        Cheap and non-blocking. Devices currently present have their last_seen
-        refreshed so presence-only mode keeps showing them as connected.
+        Returns (currently-present MACs, authoritative?) for sample() to decide
+        which devices count as connected.
         """
         with self._lock:
-            snapshot = list(self._neighbor_snapshot)
-        for ip, mac in snapshot:
-            self._ip_to_mac[ip] = mac
+            snapshot = list(self._snapshot)
+            authoritative = self._authoritative
+
+        present: set[str] = set()
+        for client in snapshot:
+            mac = client.mac
+            present.add(mac)
+            if client.ip:
+                self._ip_to_mac[client.ip] = mac
             dev = self._devices.get(mac)
             if dev is None:
-                self._devices[mac] = HotspotDevice(
-                    mac=mac, ip=ip, vendor=lookup_vendor(mac), name=None,
-                    online=True, first_seen=now, last_seen=now,
+                dev = HotspotDevice(
+                    mac=mac, ip=client.ip or "", vendor=lookup_vendor(mac),
+                    name=None, auto_name=client.name, online=True,
+                    first_seen=now, last_seen=now,
                 )
+                self._devices[mac] = dev
             else:
-                dev.ip = ip
-                dev.last_seen = now      # still present in the neighbor table
+                if client.ip:
+                    dev.ip = client.ip
+                if client.name:
+                    dev.auto_name = client.name
+                dev.last_seen = now
                 dev.online = True
                 if not dev.first_seen:
                     dev.first_seen = now
+        return present, authoritative
 
     # -- sampling -----------------------------------------------------------
 
@@ -251,8 +275,8 @@ class HotspotMonitor:
 
         drained = self.capture.drain() if self.capture_ok else {}
 
-        # Fold in the latest neighbor snapshot (refreshed off-thread).
-        self._consume_neighbors(now)
+        # Fold in the latest client snapshot (refreshed off-thread).
+        present, authoritative = self._consume_snapshot(now)
 
         # Reset live rates; fold in this interval's captured bytes.
         for dev in self._devices.values():
@@ -269,24 +293,36 @@ class HotspotMonitor:
             dev.sent_total += sent
             dev.recv_total += recv
             dev.last_seen = now
-            dev.online = True
 
-        # Mark stale devices offline and persist active ones (throttled).
-        persist_due = now - self._last_persist >= 5.0
+        # Decide who is connected. With WinRT the present set is exact; with the
+        # ARP fallback, fall back to a last-seen timeout.
         for dev in self._devices.values():
-            if now - dev.last_seen > OFFLINE_AFTER_S:
+            if authoritative:
+                dev.online = dev.mac in present
+            elif now - dev.last_seen > OFFLINE_AFTER_S:
                 dev.online = False
-            if persist_due and dev.last_seen:
-                self._persist(dev)
+
+        # Persist active devices (throttled).
+        persist_due = now - self._last_persist >= 5.0
         if persist_due:
+            for dev in self._devices.values():
+                if dev.last_seen:
+                    self._persist(dev)
             self._last_persist = now
 
+        # Only currently-connected devices are shown; history stays in the DB.
         return sorted(
-            self._devices.values(),
-            key=lambda d: (d.online, d.sent_rate + d.recv_rate,
-                           d.sent_total + d.recv_total),
+            (d for d in self._devices.values() if d.online),
+            key=lambda d: (d.sent_rate + d.recv_rate, d.sent_total + d.recv_total),
             reverse=True,
         )
+
+    def rename_device(self, mac: str, name: str) -> None:
+        """Assign (or clear) a user-defined name for a device, and persist it."""
+        dev = self._devices.get(normalize_mac(mac))
+        if dev is not None:
+            dev.name = name.strip() or None
+            self._persist(dev)
 
     def shutdown(self) -> None:
         self._poll_stop.set()

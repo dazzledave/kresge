@@ -81,27 +81,33 @@ ETW backend can be added later without changing the rest of the app.
 
 ## Hotspot monitoring
 
-The **Hotspot** tab shows devices connected to the Windows Mobile Hotspot. It
-works in two tiers:
+The **Hotspot** tab shows the devices *currently* connected to your Windows
+Mobile Hotspot, with their per-device usage. It works in two tiers:
 
-- **Tier 1 — presence (always available).** Devices are discovered from the
-  ICS neighbor (ARP) table on the hotspot subnet (`192.168.137.0/24`), showing
-  MAC, IP, online status, and a best-effort vendor name from the MAC's OUI.
-  No admin or drivers needed.
+- **Tier 1 — devices (always available).** The connected-device list comes from
+  the WinRT tethering API (`NetworkOperatorTetheringManager.GetTetheringClients`,
+  via the `winsdk` package) — an exact, live list of who's connected, with each
+  device's reported host name. The vendor is resolved from the MAC's OUI using
+  scapy's bundled IEEE registry. If WinRT is unavailable, it falls back to the
+  ICS neighbor (ARP) table on `192.168.137.0/24`.
 - **Tier 2 — per-device usage (opt-in).** Because your PC NATs all hotspot
   traffic, Windows exposes no per-client byte counters. Kresge measures usage
   by sniffing the hotspot interface with [scapy](https://scapy.net) and
   attributing bytes to each client IP. This requires:
-  1. Installing the **[Npcap](https://npcap.com)** driver, and
-  2. Running Kresge **as Administrator**.
+  1. Installing the **[Npcap](https://npcap.com)** driver (without the
+     "raw 802.11 / monitor mode" option — it breaks Mobile Hotspot), and
+  2. Running Kresge **as Administrator** (use `run-admin.bat`).
 
-  Without both, the tab automatically falls back to Tier 1 (device list only)
-  and the banner explains what's missing. The sniffer is isolated in
-  `kresge/hotspot_capture.py`, so usage is never required for presence to work.
+  Without both, the tab still lists devices (presence only) and the banner
+  explains what's missing. The sniffer is isolated in
+  `kresge/hotspot_capture.py`, so usage is never required for the list to work.
 
-Per-device cumulative totals are persisted to the database, so usage survives
-restarts. Phones using **randomized (private) MACs** are labelled as such, since
-their OUI can't be mapped to a vendor.
+Device naming: a device shows its **reported host name**, or **"Unknown device"**
+if it doesn't provide one. You can **double-click any device to give it a custom
+name** (e.g. label a Nintendo Switch that reports no name); custom names persist.
+Phones using **randomized (private) MACs** are labelled as such, since their OUI
+can't be mapped to a vendor. Per-device cumulative totals are persisted, so usage
+survives restarts.
 
 ## Project layout
 
@@ -111,8 +117,9 @@ kresge/
   config.py              Settings + byte/rate formatting
   sampler.py             Global throughput from psutil counters
   process_monitor.py     Per-process bandwidth estimation
-  hotspot_monitor.py     Hotspot device presence + usage orchestration
+  hotspot_monitor.py     Hotspot device list + usage orchestration
   hotspot_capture.py     Per-device packet capture (scapy/Npcap, opt-in)
+  tethering_clients.py   WinRT connected-client list + device names
   database.py            SQLite history (minute + daily) + hotspot devices
   alerts.py              Cap / high-usage / hog alert rules
   engine.py              Timer-driven engine; emits Qt signals
