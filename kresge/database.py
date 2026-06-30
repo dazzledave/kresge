@@ -32,6 +32,16 @@ CREATE TABLE IF NOT EXISTS daily_usage (
     sent_bytes  INTEGER NOT NULL,
     recv_bytes  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hotspot_devices (
+    mac         TEXT PRIMARY KEY,      -- normalized MAC, the stable device id
+    name        TEXT,                  -- friendly/host name if known
+    vendor      TEXT,                  -- OUI vendor lookup
+    last_ip     TEXT,                  -- most recent LAN IP
+    first_seen  REAL,                  -- epoch seconds first observed
+    last_seen   REAL,                  -- epoch seconds last had traffic/presence
+    sent_bytes  INTEGER DEFAULT 0,     -- cumulative bytes uploaded by the device
+    recv_bytes  INTEGER DEFAULT 0      -- cumulative bytes downloaded to the device
+);
 """
 
 
@@ -167,6 +177,43 @@ class Database:
             "FROM daily_usage"
         )
         return cur.fetchone()
+
+    # -- hotspot devices ----------------------------------------------------
+
+    def get_hotspot_devices(self) -> list[tuple]:
+        """Return persisted devices: (mac, name, vendor, last_ip, first_seen,
+        last_seen, sent_bytes, recv_bytes), most-recently-seen first."""
+        cur = self._conn.execute(
+            "SELECT mac, name, vendor, last_ip, first_seen, last_seen, "
+            "sent_bytes, recv_bytes FROM hotspot_devices ORDER BY last_seen DESC"
+        )
+        return cur.fetchall()
+
+    def upsert_hotspot_device(
+        self, mac: str, name: str | None, vendor: str | None, last_ip: str | None,
+        first_seen: float, last_seen: float, sent_bytes: int, recv_bytes: int,
+    ) -> None:
+        """Insert or update a device's identity and cumulative totals."""
+        self._conn.execute(
+            """INSERT INTO hotspot_devices
+                   (mac, name, vendor, last_ip, first_seen, last_seen,
+                    sent_bytes, recv_bytes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(mac) DO UPDATE SET
+                   name        = COALESCE(excluded.name, name),
+                   vendor      = COALESCE(excluded.vendor, vendor),
+                   last_ip     = excluded.last_ip,
+                   last_seen   = excluded.last_seen,
+                   sent_bytes  = excluded.sent_bytes,
+                   recv_bytes  = excluded.recv_bytes""",
+            (mac, name, vendor, last_ip, first_seen, last_seen,
+             sent_bytes, recv_bytes),
+        )
+        self._conn.commit()
+
+    def forget_hotspot_device(self, mac: str) -> None:
+        self._conn.execute("DELETE FROM hotspot_devices WHERE mac = ?", (mac,))
+        self._conn.commit()
 
     # -- maintenance --------------------------------------------------------
 

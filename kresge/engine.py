@@ -11,6 +11,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from .alerts import Alert, AlertManager
 from .config import Settings
 from .database import Database
+from .hotspot_monitor import HotspotDevice, HotspotMonitor
 from .process_monitor import ProcessMonitor, ProcessUsage
 from .sampler import NetworkSampler, Sample
 
@@ -22,10 +23,12 @@ class MonitorEngine(QObject):
     -------
     sampleReady(Sample, list)   : a new throughput sample + per-process usages
     alertRaised(Alert)          : an alert rule tripped
+    hotspotSample(list, str)    : connected hotspot devices + a status string
     """
 
     sampleReady = pyqtSignal(object, object)   # (Sample, list[ProcessUsage])
     alertRaised = pyqtSignal(object)           # (Alert,)
+    hotspotSample = pyqtSignal(object, object)  # (list[HotspotDevice], status str)
 
     def __init__(self, settings: Settings, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -34,9 +37,11 @@ class MonitorEngine(QObject):
         self.process_monitor = ProcessMonitor()
         self.db = Database()
         self.alerts = AlertManager(settings)
+        self.hotspot = HotspotMonitor(self.db)
 
         self.latest_sample: Sample | None = None
         self.latest_processes: list[ProcessUsage] = []
+        self.latest_devices: list[HotspotDevice] = []
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -74,9 +79,15 @@ class MonitorEngine(QObject):
 
         self.sampleReady.emit(sample, processes)
 
+        # Hotspot devices (no-op work when Mobile Hotspot is off).
+        devices = self.hotspot.sample(sample.interval)
+        self.latest_devices = devices
+        self.hotspotSample.emit(devices, self.hotspot.status)
+
     def _prune(self) -> None:
         self.db.prune(self.settings.keep_minute_samples_days)
 
     def shutdown(self) -> None:
         self.stop()
+        self.hotspot.shutdown()
         self.db.close()

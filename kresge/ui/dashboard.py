@@ -131,10 +131,12 @@ class DashboardWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(self._build_live_tab(), "Live")
         tabs.addTab(self._build_history_tab(), "History")
+        tabs.addTab(self._build_hotspot_tab(), "Hotspot")
         tabs.addTab(self._build_settings_tab(), "Settings")
         self.setCentralWidget(tabs)
 
         engine.sampleReady.connect(self._on_sample)
+        engine.hotspotSample.connect(self._on_hotspot_sample)
 
     # -- Live tab -----------------------------------------------------------
 
@@ -341,6 +343,124 @@ class DashboardWindow(QMainWindow):
             ticks = [(i, rows[i][0]) for i in xs if i % step == 0]
             self.hist_plot.getAxis("bottom").setTicks([ticks])
             self.hist_plot.setXRange(-0.6, len(rows) - 0.4, padding=0)
+
+    # -- Hotspot tab --------------------------------------------------------
+
+    _HOTSPOT_COLS = ["", "Device", "MAC", "IP", "Download", "Upload",
+                     "Total ↓", "Total ↑", "Last seen"]
+
+    def _build_hotspot_tab(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet(HISTORY_QSS)
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        self.hs_banner = QLabel("Mobile Hotspot is off.")
+        self.hs_banner.setWordWrap(True)
+        self.hs_banner.setStyleSheet(
+            "background:#252539; border:1px solid #34344c; border-radius:8px;"
+            "padding:10px 14px; color:#c8c8dc; font-size:13px;"
+        )
+        layout.addWidget(self.hs_banner)
+
+        summary = QHBoxLayout()
+        summary.setSpacing(12)
+        self.hs_card_count = _HistoryCard("CONNECTED DEVICES")
+        self.hs_card_down = _HistoryCard("TOTAL DOWNLOAD RATE")
+        self.hs_card_up = _HistoryCard("TOTAL UPLOAD RATE")
+        # These cards show single values, so hide the up/down sub-line.
+        for c in (self.hs_card_count, self.hs_card_down, self.hs_card_up):
+            c.sub.setVisible(False)
+            summary.addWidget(c)
+        layout.addLayout(summary)
+
+        self.hs_table = QTableWidget(0, len(self._HOTSPOT_COLS))
+        self.hs_table.setHorizontalHeaderLabels(self._HOTSPOT_COLS)
+        self.hs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.hs_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.hs_table.verticalHeader().setVisible(False)
+        hh = self.hs_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for i in range(2, len(self._HOTSPOT_COLS)):
+            hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.hs_table, stretch=1)
+
+        self.hs_empty = QLabel(
+            "No devices have connected to your hotspot yet.\n"
+            "Turn on Windows Mobile Hotspot and connect a device to see it here."
+        )
+        self.hs_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hs_empty.setStyleSheet("color:#6c6c84; font-size:14px;")
+        self.hs_empty.setVisible(False)
+        layout.addWidget(self.hs_empty, stretch=1)
+        return w
+
+    @staticmethod
+    def _fmt_ago(ts: float) -> str:
+        if not ts:
+            return "—"
+        d = time.time() - ts
+        if d < 5:
+            return "now"
+        if d < 60:
+            return f"{int(d)}s ago"
+        if d < 3600:
+            return f"{int(d / 60)}m ago"
+        if d < 86400:
+            return f"{int(d / 3600)}h ago"
+        return f"{int(d / 86400)}d ago"
+
+    def _on_hotspot_sample(self, devices, status: str) -> None:
+        bits = self.settings.units_bits
+
+        # Banner reflects capture/status; color hints at whether usage is live.
+        online = [d for d in devices if d.online]
+        if "Capturing" in status:
+            banner_color, text = "#2ecc71", f"● {status}"
+        elif "off" in status.lower():
+            banner_color, text = "#6c6c84", "○ Mobile Hotspot is off."
+        else:
+            banner_color, text = "#f1c40f", f"▲ {status}  (showing device presence only)"
+        self.hs_banner.setText(text)
+        self.hs_banner.setStyleSheet(
+            f"background:#252539; border:1px solid #34344c; border-radius:8px;"
+            f"padding:10px 14px; color:{banner_color}; font-size:13px;"
+        )
+
+        total_down = sum(d.recv_rate for d in devices)
+        total_up = sum(d.sent_rate for d in devices)
+        self.hs_card_count.value.setText(f"{len(online)}")
+        self.hs_card_down.value.setText(format_rate(total_down, bits))
+        self.hs_card_up.value.setText(format_rate(total_up, bits))
+
+        has_rows = bool(devices)
+        self.hs_table.setVisible(has_rows)
+        self.hs_empty.setVisible(not has_rows)
+
+        self.hs_table.setRowCount(len(devices))
+        for row, d in enumerate(devices):
+            dot = QTableWidgetItem("●")
+            dot.setForeground(QColor("#2ecc71" if d.online else "#555568"))
+            dot.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.hs_table.setItem(row, 0, dot)
+
+            label = d.name or d.vendor
+            self.hs_table.setItem(row, 1, QTableWidgetItem(label))
+            self.hs_table.setItem(row, 2, QTableWidgetItem(d.mac))
+            self.hs_table.setItem(row, 3, QTableWidgetItem(d.ip or "—"))
+
+            down = QTableWidgetItem(format_rate(d.recv_rate, bits))
+            down.setForeground(QColor(DOWN_COLOR))
+            self.hs_table.setItem(row, 4, down)
+            up = QTableWidgetItem(format_rate(d.sent_rate, bits))
+            up.setForeground(QColor(UP_COLOR))
+            self.hs_table.setItem(row, 5, up)
+
+            self.hs_table.setItem(row, 6, QTableWidgetItem(format_bytes(d.recv_total)))
+            self.hs_table.setItem(row, 7, QTableWidgetItem(format_bytes(d.sent_total)))
+            self.hs_table.setItem(row, 8, QTableWidgetItem(self._fmt_ago(d.last_seen)))
 
     # -- Settings tab -------------------------------------------------------
 
