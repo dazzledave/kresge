@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from .config import DB_PATH
@@ -124,6 +124,36 @@ class Database:
             (prefix + "%",),
         )
         return cur.fetchone()
+
+    def usage_buckets(self, granularity: str, limit: int) -> list[tuple[str, int, int]]:
+        """Aggregate daily usage into day/week/month buckets for the history view.
+
+        ``granularity`` is one of ``"day"``, ``"week"`` (Monday-started), or
+        ``"month"``. Returns ``(label, sent_bytes, recv_bytes)`` oldest first,
+        capped to the most recent ``limit`` buckets.
+        """
+        self._flush_minute()  # surface the latest in-progress data
+        cur = self._conn.execute(
+            "SELECT day, sent_bytes, recv_bytes FROM daily_usage ORDER BY day"
+        )
+        # dict preserves insertion order, and rows arrive chronologically.
+        buckets: dict[str, list[int]] = {}
+        labels: dict[str, str] = {}
+        for day_str, sent, recv in cur.fetchall():
+            d = date.fromisoformat(day_str)
+            if granularity == "week":
+                start = d - timedelta(days=d.weekday())   # Monday of that week
+                key, label = start.isoformat(), start.strftime("%b %d")
+            elif granularity == "month":
+                key, label = f"{d.year:04d}-{d.month:02d}", d.strftime("%b %Y")
+            else:  # day
+                key, label = day_str, d.strftime("%b %d")
+            acc = buckets.setdefault(key, [0, 0])
+            acc[0] += sent
+            acc[1] += recv
+            labels[key] = label
+        recent = list(buckets.items())[-limit:]
+        return [(labels[k], v[0], v[1]) for k, v in recent]
 
     def total_usage(self) -> tuple[int, int]:
         cur = self._conn.execute(

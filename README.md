@@ -13,7 +13,7 @@ Built with Python + PyQt6 + pyqtgraph + psutil.
 - **Per-process usage** — see which apps are moving data. (Estimated — see
   [How per-process works](#how-per-process-attribution-works).)
 - **History** — per-minute and per-day usage logged to SQLite; monthly totals,
-  all-time totals, and a 30-day daily-usage chart.
+  all-time totals, and a usage chart you can group by **day, week, or month**.
 - **Alerts & data caps** — monthly cap with early-warning threshold, sustained
   high-usage alerts, and per-process bandwidth-hog alerts, delivered as native
   Windows tray notifications.

@@ -6,13 +6,12 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from datetime import datetime
 
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFormLayout, QGridLayout, QGroupBox,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QMainWindow, QProgressBar, QPushButton,
     QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
     QVBoxLayout, QWidget,
@@ -143,17 +142,33 @@ class DashboardWindow(QMainWindow):
         self.total_label.setStyleSheet("color: #888;")
         layout.addWidget(self.total_label)
 
+        # Group-by filter: Day / Week / Month
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Group by:"))
+        self.gran_combo = QComboBox()
+        self.gran_combo.addItems(["Day", "Week", "Month"])
+        self.gran_combo.currentTextChanged.connect(lambda _: self.refresh_history())
+        controls.addWidget(self.gran_combo)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
         self.hist_plot = pg.PlotWidget()
         self.hist_plot.setBackground("#1e1e2e")
         self.hist_plot.showGrid(x=False, y=True, alpha=0.2)
-        self.hist_plot.setLabel("left", "Daily usage", units="B")
-        self.hist_plot.setTitle("Last 30 days")
+        self.hist_plot.setLabel("left", "Usage", units="B")
         layout.addWidget(self.hist_plot, stretch=1)
 
         refresh = QPushButton("Refresh history")
         refresh.clicked.connect(self.refresh_history)
         layout.addWidget(refresh, alignment=Qt.AlignmentFlag.AlignLeft)
         return w
+
+    # How each filter maps to a DB granularity, bucket count, and chart title.
+    _HIST_VIEWS = {
+        "Day": ("day", 30, "Last 30 days"),
+        "Week": ("week", 12, "Last 12 weeks"),
+        "Month": ("month", 12, "Last 12 months"),
+    }
 
     def refresh_history(self) -> None:
         # Monthly total + cap progress
@@ -177,13 +192,15 @@ class DashboardWindow(QMainWindow):
             f"(↓ {format_bytes(t_recv)} / ↑ {format_bytes(t_sent)})"
         )
 
-        # Daily bar chart (download + upload grouped)
-        rows = self.engine.db.daily_usage(30)
+        # Usage bar chart (download + upload grouped), bucketed by the filter.
+        granularity, limit, title = self._HIST_VIEWS[self.gran_combo.currentText()]
+        rows = self.engine.db.usage_buckets(granularity, limit)
+        self.hist_plot.setTitle(title)
         self.hist_plot.clear()
         if rows:
             xs = list(range(len(rows)))
-            recv = [r[2] for r in rows]
             sent = [r[1] for r in rows]
+            recv = [r[2] for r in rows]
             self.hist_plot.addItem(pg.BarGraphItem(
                 x=[x - 0.2 for x in xs], height=recv, width=0.4, brush=DOWN_COLOR
             ))
@@ -191,8 +208,7 @@ class DashboardWindow(QMainWindow):
                 x=[x + 0.2 for x in xs], height=sent, width=0.4, brush=UP_COLOR
             ))
             ax = self.hist_plot.getAxis("bottom")
-            ax.setTicks([[(i, datetime.fromisoformat(r[0]).strftime("%m-%d"))
-                          for i, r in enumerate(rows)]])
+            ax.setTicks([[(i, rows[i][0]) for i in xs]])
 
     # -- Settings tab -------------------------------------------------------
 
