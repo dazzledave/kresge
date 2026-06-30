@@ -12,9 +12,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QDoubleSpinBox, QFormLayout, QFrame, QGridLayout,
-    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QProgressBar,
-    QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
-    QTabWidget, QVBoxLayout, QWidget,
+    QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QMainWindow,
+    QProgressBar, QPushButton, QSpinBox, QSplitter, QTableWidget,
+    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ..config import Settings, format_bytes, format_rate
@@ -346,8 +346,8 @@ class DashboardWindow(QMainWindow):
 
     # -- Hotspot tab --------------------------------------------------------
 
-    _HOTSPOT_COLS = ["", "Device", "MAC", "IP", "Download", "Upload",
-                     "Total ↓", "Total ↑", "Last seen"]
+    _HOTSPOT_COLS = ["", "Device", "Vendor", "MAC", "IP", "Download", "Upload",
+                     "Total ↓", "Total ↑"]
 
     def _build_hotspot_tab(self) -> QWidget:
         w = QWidget()
@@ -375,11 +375,13 @@ class DashboardWindow(QMainWindow):
             summary.addWidget(c)
         layout.addLayout(summary)
 
+        self._hs_devices: list = []   # row index -> device, for rename
         self.hs_table = QTableWidget(0, len(self._HOTSPOT_COLS))
         self.hs_table.setHorizontalHeaderLabels(self._HOTSPOT_COLS)
         self.hs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.hs_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.hs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.hs_table.verticalHeader().setVisible(False)
+        self.hs_table.cellDoubleClicked.connect(self._rename_hotspot_device)
         hh = self.hs_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -387,9 +389,13 @@ class DashboardWindow(QMainWindow):
             hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.hs_table, stretch=1)
 
+        hint = QLabel("Tip: double-click a device to rename it.")
+        hint.setStyleSheet("color:#6c6c84; font-size:11px;")
+        layout.addWidget(hint)
+
         self.hs_empty = QLabel(
-            "No devices have connected to your hotspot yet.\n"
-            "Turn on Windows Mobile Hotspot and connect a device to see it here."
+            "No devices are connected to your hotspot right now.\n"
+            "Connect a device to your Windows Mobile Hotspot to see it here."
         )
         self.hs_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hs_empty.setStyleSheet("color:#6c6c84; font-size:14px;")
@@ -397,26 +403,25 @@ class DashboardWindow(QMainWindow):
         layout.addWidget(self.hs_empty, stretch=1)
         return w
 
-    @staticmethod
-    def _fmt_ago(ts: float) -> str:
-        if not ts:
-            return "—"
-        d = time.time() - ts
-        if d < 5:
-            return "now"
-        if d < 60:
-            return f"{int(d)}s ago"
-        if d < 3600:
-            return f"{int(d / 60)}m ago"
-        if d < 86400:
-            return f"{int(d / 3600)}h ago"
-        return f"{int(d / 86400)}d ago"
+    def _rename_hotspot_device(self, row: int, _col: int) -> None:
+        if row < 0 or row >= len(self._hs_devices):
+            return
+        dev = self._hs_devices[row]
+        text, ok = QInputDialog.getText(
+            self, "Rename device",
+            f"Name for {dev.vendor}  ({dev.mac}):",
+            text=(dev.name or dev.auto_name or ""),
+        )
+        if ok:
+            self.engine.hotspot.rename_device(dev.mac, text)
+            # Re-render immediately so the new name shows without waiting a tick.
+            self._on_hotspot_sample(self.engine.latest_devices, self.engine.hotspot.status)
 
     def _on_hotspot_sample(self, devices, status: str) -> None:
         bits = self.settings.units_bits
+        self._hs_devices = list(devices)   # devices are the currently-connected set
 
         # Banner reflects capture/status; color hints at whether usage is live.
-        online = [d for d in devices if d.online]
         if "Capturing" in status:
             banner_color, text = "#2ecc71", f"● {status}"
         elif "off" in status.lower():
@@ -431,7 +436,7 @@ class DashboardWindow(QMainWindow):
 
         total_down = sum(d.recv_rate for d in devices)
         total_up = sum(d.sent_rate for d in devices)
-        self.hs_card_count.value.setText(f"{len(online)}")
+        self.hs_card_count.value.setText(f"{len(devices)}")
         self.hs_card_down.value.setText(format_rate(total_down, bits))
         self.hs_card_up.value.setText(format_rate(total_up, bits))
 
@@ -442,25 +447,27 @@ class DashboardWindow(QMainWindow):
         self.hs_table.setRowCount(len(devices))
         for row, d in enumerate(devices):
             dot = QTableWidgetItem("●")
-            dot.setForeground(QColor("#2ecc71" if d.online else "#555568"))
+            dot.setForeground(QColor("#2ecc71"))   # only connected devices shown
             dot.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.hs_table.setItem(row, 0, dot)
 
-            label = d.name or d.vendor
-            self.hs_table.setItem(row, 1, QTableWidgetItem(label))
-            self.hs_table.setItem(row, 2, QTableWidgetItem(d.mac))
-            self.hs_table.setItem(row, 3, QTableWidgetItem(d.ip or "—"))
+            name = QTableWidgetItem(d.label())
+            if not d.name and not d.auto_name:
+                name.setForeground(QColor("#8c8ca6"))   # grey for "Unknown device"
+            self.hs_table.setItem(row, 1, name)
+            self.hs_table.setItem(row, 2, QTableWidgetItem(d.vendor))
+            self.hs_table.setItem(row, 3, QTableWidgetItem(d.mac))
+            self.hs_table.setItem(row, 4, QTableWidgetItem(d.ip or "—"))
 
             down = QTableWidgetItem(format_rate(d.recv_rate, bits))
             down.setForeground(QColor(DOWN_COLOR))
-            self.hs_table.setItem(row, 4, down)
+            self.hs_table.setItem(row, 5, down)
             up = QTableWidgetItem(format_rate(d.sent_rate, bits))
             up.setForeground(QColor(UP_COLOR))
-            self.hs_table.setItem(row, 5, up)
+            self.hs_table.setItem(row, 6, up)
 
-            self.hs_table.setItem(row, 6, QTableWidgetItem(format_bytes(d.recv_total)))
-            self.hs_table.setItem(row, 7, QTableWidgetItem(format_bytes(d.sent_total)))
-            self.hs_table.setItem(row, 8, QTableWidgetItem(self._fmt_ago(d.last_seen)))
+            self.hs_table.setItem(row, 7, QTableWidgetItem(format_bytes(d.recv_total)))
+            self.hs_table.setItem(row, 8, QTableWidgetItem(format_bytes(d.sent_total)))
 
     # -- Settings tab -------------------------------------------------------
 
