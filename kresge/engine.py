@@ -1,0 +1,82 @@
+"""The monitoring engine: a QObject that drives sampling on a timer and emits
+signals the UI subscribes to. This is the single source of truth that both the
+tray icon and the dashboard listen to, so they always show the same numbers.
+"""
+from __future__ import annotations
+
+import time
+
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+
+from .alerts import Alert, AlertManager
+from .config import Settings
+from .database import Database
+from .process_monitor import ProcessMonitor, ProcessUsage
+from .sampler import NetworkSampler, Sample
+
+
+class MonitorEngine(QObject):
+    """Owns the sampling loop and broadcasts results.
+
+    Signals
+    -------
+    sampleReady(Sample, list)   : a new throughput sample + per-process usages
+    alertRaised(Alert)          : an alert rule tripped
+    """
+
+    sampleReady = pyqtSignal(object, object)   # (Sample, list[ProcessUsage])
+    alertRaised = pyqtSignal(object)           # (Alert,)
+
+    def __init__(self, settings: Settings, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.settings = settings
+        self.sampler = NetworkSampler()
+        self.process_monitor = ProcessMonitor()
+        self.db = Database()
+        self.alerts = AlertManager(settings)
+
+        self.latest_sample: Sample | None = None
+        self.latest_processes: list[ProcessUsage] = []
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+
+        # Prune old history roughly once an hour.
+        self._prune_timer = QTimer(self)
+        self._prune_timer.timeout.connect(self._prune)
+        self._prune_timer.start(3600 * 1000)
+
+    def start(self) -> None:
+        self._timer.start(self.settings.sample_interval_ms)
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    def apply_interval(self) -> None:
+        """Restart the timer after a settings change to the sample interval."""
+        if self._timer.isActive():
+            self._timer.start(self.settings.sample_interval_ms)
+
+    def _tick(self) -> None:
+        sample = self.sampler.sample()
+        if sample is None:
+            return  # first reading just primes the baseline
+
+        processes = self.process_monitor.sample(sample)
+        self.latest_sample = sample
+        self.latest_processes = processes
+
+        self.db.record(sample)
+
+        month_sent, month_recv = self.db.month_usage()
+        for alert in self.alerts.check(sample, processes, month_sent, month_recv):
+            self.alertRaised.emit(alert)
+
+        self.sampleReady.emit(sample, processes)
+
+    def _prune(self) -> None:
+        self.db.prune(self.settings.keep_minute_samples_days)
+
+    def shutdown(self) -> None:
+        self.stop()
+        self.db.close()
