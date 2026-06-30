@@ -1,0 +1,4 @@
+# Core
+psutil>=5.9.0          # cross-platform network/process stats
+PyQt6>=6.6.0           # GUI framework (dashboard + tray)
+pyqtgraph>=0.13.3      # fast live plotting for throughput charts
