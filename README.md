@@ -102,6 +102,11 @@ Mobile Hotspot, with their per-device usage. It works in two tiers:
   explains what's missing. The sniffer is isolated in
   `kresge/hotspot_capture.py`, so usage is never required for the list to work.
 
+The tab has a **Connected / All devices** toggle: "Connected" shows who's on the
+hotspot right now, while "All devices" is a history view of every device ever
+seen — including offline ones, with their **lifetime totals** and when they were
+last seen.
+
 Device naming: a device shows its **reported host name**, or **"Unknown device"**
 if it doesn't provide one. You can **double-click any device to give it a custom
 name** (e.g. label a Nintendo Switch that reports no name); custom names persist.
