@@ -9,12 +9,12 @@ from collections import deque
 
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QCursor
 from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QDoubleSpinBox, QFormLayout, QFrame, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QMainWindow,
     QProgressBar, QPushButton, QSpinBox, QSplitter, QTableWidget,
-    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QTableWidgetItem, QTabWidget, QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 
 from ..config import Settings, format_bytes, format_rate
@@ -26,6 +26,42 @@ from .icons import make_icon
 DOWN_COLOR = "#2ecc71"
 UP_COLOR = "#3498db"
 ACCENT = "#5c7cff"
+
+# Plain-language explanations shown by the ⓘ icons on the Settings tab.
+_INFO = {
+    "sample_interval":
+        "How often Kresge reads the network counters. Lower values make the "
+        "live graph more responsive but use a little more CPU. Default is "
+        "1000 ms (once per second).",
+    "chart_window":
+        "How many seconds of history the live throughput graph shows before it "
+        "scrolls. For example, 120 gives a 2-minute rolling window.",
+    "monthly_cap":
+        "Your data plan's monthly limit, in gigabytes. When set, Kresge tracks "
+        "this month's usage against it and warns you as you get close. Set 0 to "
+        "turn cap tracking off.",
+    "cap_warn":
+        "How full the monthly cap must get before Kresge shows an early warning. "
+        "For example, 90 warns you once you've used 90% of the cap.",
+    "high_usage":
+        "Sends an alert when your total network speed stays above this many Mbps "
+        "for the sustained time below — handy for catching unexpected heavy "
+        "usage. Set 0 to turn it off.",
+    "sustained_for":
+        "How many seconds total usage must stay above the high-usage threshold "
+        "before the alert fires. This stops brief spikes from triggering it.",
+    "hog":
+        "Sends an alert when a single app's estimated bandwidth goes above this "
+        "many Mbps — useful for spotting a program hogging the connection. Set 0 "
+        "to turn it off. (Per-app figures are estimates.)",
+    "units_bits":
+        "Show speeds in bits per second (Mbps), the way internet plans are "
+        "advertised, instead of bytes per second (MB/s). Note: 8 bits = 1 byte, "
+        "so 80 Mbps ≈ 10 MB/s.",
+    "start_minimized":
+        "When on, Kresge starts straight to the system tray without opening the "
+        "dashboard window. Useful if you run it automatically at login.",
+}
 
 # Stylesheet for the History tab. Scoped via object names so it doesn't leak
 # into the other tabs.
@@ -471,6 +507,44 @@ class DashboardWindow(QMainWindow):
 
     # -- Settings tab -------------------------------------------------------
 
+    def _info_button(self, info: str) -> QToolButton:
+        """A small ⓘ icon that shows `info` as a popup on click (and on hover)."""
+        btn = QToolButton()
+        btn.setText("ⓘ")   # ⓘ
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setAutoRaise(True)
+        btn.setToolTip(info)    # hover also works
+        btn.setStyleSheet(
+            "QToolButton { border: none; color: #7a7a95; font-size: 14px; padding: 0 2px; }"
+            "QToolButton:hover { color: %s; }" % ACCENT
+        )
+        # Rich text makes the popup word-wrap to a readable width.
+        html = f"<div style='width: 260px'>{info}</div>"
+        btn.clicked.connect(lambda: QToolTip.showText(QCursor.pos(), html, btn))
+        return btn
+
+    def _setting_label(self, text: str, info: str) -> QWidget:
+        """Form-row label: the text plus a trailing ⓘ info icon."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(5)
+        h.addWidget(QLabel(text))
+        h.addWidget(self._info_button(info))
+        h.addStretch(1)
+        return w
+
+    def _checkbox_row(self, checkbox: QCheckBox, info: str) -> QWidget:
+        """A checkbox followed by its ⓘ info icon, for full-width form rows."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(5)
+        h.addWidget(checkbox)
+        h.addWidget(self._info_button(info))
+        h.addStretch(1)
+        return w
+
     def _build_settings_tab(self) -> QWidget:
         w = QWidget()
         outer = QVBoxLayout(w)
@@ -482,51 +556,58 @@ class DashboardWindow(QMainWindow):
         self.sp_interval.setSingleStep(250)
         self.sp_interval.setSuffix(" ms")
         self.sp_interval.setValue(s.sample_interval_ms)
-        form.addRow("Sample interval", self.sp_interval)
+        form.addRow(self._setting_label("Sample interval", _INFO["sample_interval"]),
+                    self.sp_interval)
 
         self.sp_window = QSpinBox()
         self.sp_window.setRange(30, 1800)
         self.sp_window.setSuffix(" s")
         self.sp_window.setValue(s.chart_window_seconds)
-        form.addRow("Chart window", self.sp_window)
+        form.addRow(self._setting_label("Chart window", _INFO["chart_window"]),
+                    self.sp_window)
 
         self.sp_cap = QDoubleSpinBox()
         self.sp_cap.setRange(0, 100000)
         self.sp_cap.setSuffix(" GB")
         self.sp_cap.setValue(s.monthly_cap_gb)
-        form.addRow("Monthly data cap (0 = off)", self.sp_cap)
+        form.addRow(self._setting_label("Monthly data cap (0 = off)", _INFO["monthly_cap"]),
+                    self.sp_cap)
 
         self.sp_capwarn = QSpinBox()
         self.sp_capwarn.setRange(1, 100)
         self.sp_capwarn.setSuffix(" %")
         self.sp_capwarn.setValue(s.cap_warn_percent)
-        form.addRow("Warn at cap %", self.sp_capwarn)
+        form.addRow(self._setting_label("Warn at cap %", _INFO["cap_warn"]),
+                    self.sp_capwarn)
 
         self.sp_high = QDoubleSpinBox()
         self.sp_high.setRange(0, 100000)
         self.sp_high.setSuffix(" Mbps")
         self.sp_high.setValue(s.high_usage_mbps)
-        form.addRow("High-usage alert (0 = off)", self.sp_high)
+        form.addRow(self._setting_label("High-usage alert (0 = off)", _INFO["high_usage"]),
+                    self.sp_high)
 
         self.sp_high_sustain = QSpinBox()
         self.sp_high_sustain.setRange(1, 600)
         self.sp_high_sustain.setSuffix(" s")
         self.sp_high_sustain.setValue(s.high_usage_sustain_s)
-        form.addRow("…sustained for", self.sp_high_sustain)
+        form.addRow(self._setting_label("…sustained for", _INFO["sustained_for"]),
+                    self.sp_high_sustain)
 
         self.sp_hog = QDoubleSpinBox()
         self.sp_hog.setRange(0, 100000)
         self.sp_hog.setSuffix(" Mbps")
         self.sp_hog.setValue(s.process_hog_mbps)
-        form.addRow("Per-process hog alert (0 = off)", self.sp_hog)
+        form.addRow(self._setting_label("Per-process hog alert (0 = off)", _INFO["hog"]),
+                    self.sp_hog)
 
         self.cb_bits = QCheckBox("Show speeds in bits (Mbps) instead of bytes")
         self.cb_bits.setChecked(s.units_bits)
-        form.addRow("", self.cb_bits)
+        form.addRow("", self._checkbox_row(self.cb_bits, _INFO["units_bits"]))
 
         self.cb_min = QCheckBox("Start minimized to tray")
         self.cb_min.setChecked(s.start_minimized)
-        form.addRow("", self.cb_min)
+        form.addRow("", self._checkbox_row(self.cb_min, _INFO["start_minimized"]))
 
         outer.addLayout(form)
         save = QPushButton("Save settings")
