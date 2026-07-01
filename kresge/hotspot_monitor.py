@@ -232,15 +232,17 @@ class HotspotMonitor:
             present.add(mac)
             if client.ip:
                 self._ip_to_mac[client.ip] = mac
+            vendor = lookup_vendor(mac)   # authoritative; corrects old records
             dev = self._devices.get(mac)
             if dev is None:
                 dev = HotspotDevice(
-                    mac=mac, ip=client.ip or "", vendor=lookup_vendor(mac),
+                    mac=mac, ip=client.ip or "", vendor=vendor,
                     name=None, auto_name=client.name, online=True,
                     first_seen=now, last_seen=now,
                 )
                 self._devices[mac] = dev
             else:
+                dev.vendor = vendor
                 if client.ip:
                     dev.ip = client.ip
                 if client.name:
@@ -250,6 +252,18 @@ class HotspotMonitor:
                 if not dev.first_seen:
                     dev.first_seen = now
         return present, authoritative
+
+    def all_devices(self) -> list[HotspotDevice]:
+        """Every device ever seen (connected first, then most-recently-seen).
+
+        Powers the Hotspot tab's "All devices" history view. Offline devices
+        keep their persisted lifetime totals and last-seen time.
+        """
+        return sorted(
+            self._devices.values(),
+            key=lambda d: (d.online, d.last_seen),
+            reverse=True,
+        )
 
     # -- sampling -----------------------------------------------------------
 
