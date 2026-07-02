@@ -13,8 +13,9 @@ from PyQt6.QtGui import QColor, QCursor
 from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QDoubleSpinBox, QFormLayout, QFrame, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QMainWindow,
-    QProgressBar, QPushButton, QSpinBox, QSplitter, QTableWidget,
-    QTableWidgetItem, QTabWidget, QToolButton, QToolTip, QVBoxLayout, QWidget,
+    QMenu, QMessageBox, QProgressBar, QPushButton, QSpinBox, QSplitter,
+    QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QToolTip,
+    QVBoxLayout, QWidget,
 )
 
 from ..config import Settings, format_bytes, format_rate
@@ -383,7 +384,7 @@ class DashboardWindow(QMainWindow):
     # -- Hotspot tab --------------------------------------------------------
 
     _HOTSPOT_COLS = ["", "Device", "Vendor", "MAC", "IP", "Download", "Upload",
-                     "Total ↓", "Total ↑", "Last connected"]
+                     "Total ↓", "Total ↑", "Session / limit", "Last connected"]
 
     def _build_hotspot_tab(self) -> QWidget:
         w = QWidget()
@@ -435,6 +436,8 @@ class DashboardWindow(QMainWindow):
         self.hs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.hs_table.verticalHeader().setVisible(False)
         self.hs_table.cellDoubleClicked.connect(self._rename_hotspot_device)
+        self.hs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.hs_table.customContextMenuRequested.connect(self._hs_context_menu)
         hh = self.hs_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -442,7 +445,7 @@ class DashboardWindow(QMainWindow):
             hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.hs_table, stretch=1)
 
-        hint = QLabel("Tip: double-click a device to rename it.")
+        hint = QLabel("Tip: double-click to rename • right-click for data limits and blocking.")
         hint.setStyleSheet("color:#6c6c84; font-size:11px;")
         layout.addWidget(hint)
 
@@ -527,10 +530,17 @@ class DashboardWindow(QMainWindow):
         self.hs_empty.setVisible(not has_rows)
 
         dim = QColor("#6c6c84")
+        red = QColor("#e74c3c")
         self.hs_table.setRowCount(len(rows))
         for row, d in enumerate(rows):
+            cut_off = d.is_cut_off()
             dot = QTableWidgetItem("●")
-            dot.setForeground(QColor("#2ecc71") if d.online else QColor("#555568"))
+            if cut_off:
+                dot.setForeground(red)          # blocked / over cap
+            elif d.online:
+                dot.setForeground(QColor("#2ecc71"))
+            else:
+                dot.setForeground(QColor("#555568"))
             dot.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.hs_table.setItem(row, 0, dot)
 
@@ -556,10 +566,79 @@ class DashboardWindow(QMainWindow):
 
             self.hs_table.setItem(row, 7, QTableWidgetItem(format_bytes(d.recv_total)))
             self.hs_table.setItem(row, 8, QTableWidgetItem(format_bytes(d.sent_total)))
+
+            # Session / limit column, and block status.
+            if d.blocked:
+                lim = QTableWidgetItem("Blocked"); lim.setForeground(red)
+            elif d.limit_bytes > 0:
+                lim = QTableWidgetItem(
+                    f"{format_bytes(d.session_bytes)} / {format_bytes(d.limit_bytes)}")
+                lim.setForeground(red if d.over_limit() else dim)
+            else:
+                lim = QTableWidgetItem("—"); lim.setForeground(dim)
+            self.hs_table.setItem(row, 9, lim)
+
             seen = QTableWidgetItem("now" if d.online else self._fmt_ago(d.last_seen))
             if not d.online:
                 seen.setForeground(dim)
-            self.hs_table.setItem(row, 9, seen)
+            self.hs_table.setItem(row, 10, seen)
+
+    # -- Hotspot device controls (right-click) ------------------------------
+
+    def _hs_context_menu(self, pos) -> None:
+        row = self.hs_table.rowAt(pos.y())
+        if row < 0 or row >= len(self._hs_devices):
+            return
+        dev = self._hs_devices[row]
+        menu = QMenu(self)
+        menu.addAction("Rename…", lambda: self._rename_hotspot_device(row, 0))
+        menu.addSeparator()
+        menu.addAction("Set session data limit…", lambda: self._hs_set_limit(dev))
+        if dev.limit_bytes > 0:
+            menu.addAction("Remove data limit", lambda: self._hs_apply_limit(dev.mac, 0))
+        menu.addSeparator()
+        if dev.blocked:
+            menu.addAction("Unblock device", lambda: self._hs_set_blocked(dev.mac, False))
+        else:
+            menu.addAction("Block device (disconnect)", lambda: self._hs_set_blocked(dev.mac, True))
+        menu.exec(self.hs_table.viewport().mapToGlobal(pos))
+
+    def _hs_admin_ok(self) -> bool:
+        if self.engine.hotspot.controller.available():
+            return True
+        QMessageBox.information(
+            self, "Administrator required",
+            "Blocking a device changes the Windows neighbor table, which needs "
+            "Administrator rights.\n\nRestart Kresge with run-admin.bat to enable "
+            "blocking and automatic limit enforcement.",
+        )
+        return False
+
+    def _hs_set_limit(self, dev) -> None:
+        current_mb = round(dev.limit_bytes / (1024 * 1024), 1) if dev.limit_bytes else 0.0
+        mb, ok = QInputDialog.getDouble(
+            self, "Session data limit",
+            f"Data limit for {dev.label()} this session (MB, 0 = no limit):",
+            value=current_mb, min=0, max=1_000_000, decimals=1,
+        )
+        if ok:
+            self._hs_apply_limit(dev.mac, int(mb * 1024 * 1024))
+
+    def _hs_apply_limit(self, mac: str, limit_bytes: int) -> None:
+        # A hard limit auto-blocks at the cap, which needs admin; warn if not.
+        if limit_bytes > 0 and not self.engine.hotspot.controller.available():
+            self._hs_admin_ok()   # informational; limit is still tracked/notified
+        self.engine.hotspot.set_limit(mac, limit_bytes)
+        self._on_hotspot_sample(self.engine.latest_devices, self.engine.hotspot.status)
+
+    def _hs_set_blocked(self, mac: str, blocked: bool) -> None:
+        if blocked and not self._hs_admin_ok():
+            return
+        if blocked:
+            self.engine.hotspot.block_device(mac)
+        else:
+            self.engine.hotspot.unblock_device(mac)
+        self._on_hotspot_sample(self.engine.latest_devices, self.engine.hotspot.status)
 
     # -- Settings tab -------------------------------------------------------
 

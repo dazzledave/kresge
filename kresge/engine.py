@@ -8,7 +8,7 @@ import time
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
-from .alerts import Alert, AlertManager
+from .alerts import Alert, AlertLevel, AlertManager
 from .config import Settings
 from .database import Database
 from .hotspot_monitor import HotspotDevice, HotspotMonitor
@@ -82,6 +82,11 @@ class MonitorEngine(QObject):
         # Hotspot devices (no-op work when Mobile Hotspot is off).
         devices = self.hotspot.sample(sample.interval)
         self.latest_devices = devices
+        for msg in self.hotspot.pop_events():
+            self.alertRaised.emit(Alert(
+                key="hotspot_cap", level=AlertLevel.WARNING,
+                title="Hotspot data limit", message=msg, ts=sample.ts,
+            ))
         self.hotspotSample.emit(devices, self.hotspot.status)
 
     def _prune(self) -> None:
