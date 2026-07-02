@@ -383,7 +383,7 @@ class DashboardWindow(QMainWindow):
     # -- Hotspot tab --------------------------------------------------------
 
     _HOTSPOT_COLS = ["", "Device", "Vendor", "MAC", "IP", "Download", "Upload",
-                     "Total ↓", "Total ↑", "Last seen"]
+                     "Total ↓", "Total ↑", "Last connected"]
 
     def _build_hotspot_tab(self) -> QWidget:
         w = QWidget()
