@@ -13,3 +13,6 @@ venv/
 # Local data / logs
 *.db
 *.log
+
+# test files
+validate-block.ps1
