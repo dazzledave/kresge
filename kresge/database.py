@@ -40,9 +40,19 @@ CREATE TABLE IF NOT EXISTS hotspot_devices (
     first_seen  REAL,                  -- epoch seconds first observed
     last_seen   REAL,                  -- epoch seconds last had traffic/presence
     sent_bytes  INTEGER DEFAULT 0,     -- cumulative bytes uploaded by the device
-    recv_bytes  INTEGER DEFAULT 0      -- cumulative bytes downloaded to the device
+    recv_bytes  INTEGER DEFAULT 0,     -- cumulative bytes downloaded to the device
+    limit_bytes INTEGER DEFAULT 0,     -- per-session data cap (0 = no limit)
+    blocked     INTEGER DEFAULT 0      -- 1 = manually blocked from the hotspot
 );
 """
+
+# Columns added after the first release; applied to older databases on open.
+_MIGRATIONS = {
+    "hotspot_devices": {
+        "limit_bytes": "INTEGER DEFAULT 0",
+        "blocked": "INTEGER DEFAULT 0",
+    },
+}
 
 
 class Database:
@@ -55,6 +65,7 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
 
         self._buf_minute: int | None = None
@@ -178,16 +189,41 @@ class Database:
         )
         return cur.fetchone()
 
+    def _migrate(self) -> None:
+        """Add any columns introduced after a database was first created."""
+        for table, columns in _MIGRATIONS.items():
+            existing = {row[1] for row in
+                        self._conn.execute(f"PRAGMA table_info({table})")}
+            for name, decl in columns.items():
+                if name not in existing:
+                    self._conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
     # -- hotspot devices ----------------------------------------------------
 
     def get_hotspot_devices(self) -> list[tuple]:
         """Return persisted devices: (mac, name, vendor, last_ip, first_seen,
-        last_seen, sent_bytes, recv_bytes), most-recently-seen first."""
+        last_seen, sent_bytes, recv_bytes, limit_bytes, blocked), newest first."""
         cur = self._conn.execute(
             "SELECT mac, name, vendor, last_ip, first_seen, last_seen, "
-            "sent_bytes, recv_bytes FROM hotspot_devices ORDER BY last_seen DESC"
+            "sent_bytes, recv_bytes, limit_bytes, blocked "
+            "FROM hotspot_devices ORDER BY last_seen DESC"
         )
         return cur.fetchall()
+
+    def set_hotspot_limit(self, mac: str, limit_bytes: int) -> None:
+        self._conn.execute(
+            "UPDATE hotspot_devices SET limit_bytes = ? WHERE mac = ?",
+            (int(limit_bytes), mac),
+        )
+        self._conn.commit()
+
+    def set_hotspot_blocked(self, mac: str, blocked: bool) -> None:
+        self._conn.execute(
+            "UPDATE hotspot_devices SET blocked = ? WHERE mac = ?",
+            (1 if blocked else 0, mac),
+        )
+        self._conn.commit()
 
     def upsert_hotspot_device(
         self, mac: str, name: str | None, vendor: str | None, last_ip: str | None,
