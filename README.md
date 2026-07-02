@@ -107,6 +107,21 @@ hotspot right now, while "All devices" is a history view of every device ever
 seen — including offline ones, with their **lifetime totals** and when they were
 last seen.
 
+**Per-device limits & blocking.** Right-click any device to:
+- **Set a session data limit** — a per-connection cap (resets when the device
+  reconnects). When a device crosses it you get a tray notification, and if
+  enforcement is available the device is automatically cut off until it
+  reconnects or you clear the limit.
+- **Block / unblock a device** — immediately cut it off ("temporarily
+  disconnect") or restore it.
+
+Enforcement works by poisoning the host's ARP/neighbor entry for the device so
+its traffic is dropped — the device shows "connected, no internet". It's a
+traffic block, not a Wi-Fi deauth, is fully reversible, and requires running as
+Administrator (`run-admin.bat`). Blocks are cleared automatically when Kresge
+exits, so no device is left stuck offline; a device's blocked/limit state is
+remembered and re-applied when it reconnects while Kresge is running.
+
 Device naming: a device shows its **reported host name**, or **"Unknown device"**
 if it doesn't provide one. You can **double-click any device to give it a custom
 name** (e.g. label a Nintendo Switch that reports no name); custom names persist.
@@ -124,6 +139,7 @@ kresge/
   process_monitor.py     Per-process bandwidth estimation
   hotspot_monitor.py     Hotspot device list + usage orchestration
   hotspot_capture.py     Per-device packet capture (scapy/Npcap, opt-in)
+  hotspot_control.py     Per-device blocking / limit enforcement (ARP)
   tethering_clients.py   WinRT connected-client list + device names
   database.py            SQLite history (minute + daily) + hotspot devices
   alerts.py              Cap / high-usage / hog alert rules
