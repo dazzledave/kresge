@@ -11,22 +11,19 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QCursor
 from PyQt6.QtWidgets import (
-    QButtonGroup, QCheckBox, QDoubleSpinBox, QFormLayout, QFrame, QGridLayout,
-    QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QMainWindow,
-    QMenu, QMessageBox, QProgressBar, QPushButton, QSpinBox, QSplitter,
-    QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QToolTip,
-    QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QCheckBox, QDoubleSpinBox, QFormLayout, QFrame,
+    QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+    QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QSpinBox,
+    QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton,
+    QToolTip, QVBoxLayout, QWidget,
 )
 
 from ..config import Settings, format_bytes, format_rate
 from ..engine import MonitorEngine
 from ..process_monitor import ProcessUsage
 from ..sampler import Sample
-from .icons import make_icon
-
-DOWN_COLOR = "#2ecc71"
-UP_COLOR = "#3498db"
-ACCENT = "#5c7cff"
+from .icons import make_icon, make_moon_icon, make_sun_icon
+from .theme import ACCENT, DOWN_COLOR, THEMES, UP_COLOR, build_palette, scoped_qss
 
 # Plain-language explanations shown by the ⓘ icons on the Settings tab.
 _INFO = {
@@ -63,38 +60,6 @@ _INFO = {
         "When on, Kresge starts straight to the system tray without opening the "
         "dashboard window. Useful if you run it automatically at login.",
 }
-
-# Stylesheet for the History tab. Scoped via object names so it doesn't leak
-# into the other tabs.
-HISTORY_QSS = f"""
-QFrame#histCard {{
-    background: #252539;
-    border: 1px solid #34344c;
-    border-radius: 10px;
-}}
-QLabel#cardTitle {{ color: #8c8ca6; font-size: 11px; font-weight: 600; }}
-QLabel#cardValue {{ color: #f0f0f8; font-size: 23px; font-weight: 700; }}
-QLabel#cardSub   {{ font-size: 12px; }}
-QLabel#histLegend {{ font-size: 12px; }}
-QPushButton#segBtn {{
-    background: #252539; color: #b0b0c8; border: 1px solid #34344c;
-    padding: 6px 20px; font-weight: 600;
-}}
-QPushButton#segBtn:hover {{ background: #2e2e46; }}
-QPushButton#segBtn:checked {{
-    background: {ACCENT}; color: #ffffff; border-color: {ACCENT};
-}}
-QProgressBar#capBar {{
-    border: 1px solid #34344c; border-radius: 8px; background: #252539;
-    text-align: center; color: #e8e8f0; min-height: 22px;
-}}
-QPushButton#refreshBtn {{
-    background: #252539; color: #b0b0c8; border: 1px solid #34344c;
-    border-radius: 6px; padding: 6px 16px;
-}}
-QPushButton#refreshBtn:hover {{ background: #2e2e46; }}
-"""
-
 
 class _ByteAxisItem(pg.AxisItem):
     """Y-axis that prints human-readable byte sizes instead of raw counts."""
@@ -152,6 +117,7 @@ class DashboardWindow(QMainWindow):
         super().__init__()
         self.engine = engine
         self.settings = settings
+        self.C = THEMES.get(settings.theme, THEMES["dark"])   # active theme colors
         self.setWindowTitle("Kresge — Network Monitor")
         self.setWindowIcon(make_icon())
         self.resize(940, 680)
@@ -172,8 +138,52 @@ class DashboardWindow(QMainWindow):
         tabs.addTab(self._build_settings_tab(), "Settings")
         self.setCentralWidget(tabs)
 
+        # Theme toggle (sun/moon) at the far right of the tab bar.
+        self.theme_btn = QToolButton()
+        self.theme_btn.setAutoRaise(True)
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_btn.setStyleSheet("QToolButton { border: none; padding: 4px 8px; }")
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        tabs.setCornerWidget(self.theme_btn, Qt.Corner.TopRightCorner)
+        self._update_theme_button()
+
         engine.sampleReady.connect(self._on_sample)
         engine.hotspotSample.connect(self._on_hotspot_sample)
+
+    # -- Theme --------------------------------------------------------------
+
+    def _update_theme_button(self) -> None:
+        dark = self.settings.theme == "dark"
+        # Show the icon of the mode you'll switch TO.
+        self.theme_btn.setIcon(
+            make_sun_icon(self.C["icon"]) if dark else make_moon_icon(self.C["icon"]))
+        self.theme_btn.setToolTip(
+            "Switch to light theme" if dark else "Switch to dark theme")
+
+    def _toggle_theme(self) -> None:
+        self.apply_theme("light" if self.settings.theme == "dark" else "dark")
+
+    def apply_theme(self, name: str) -> None:
+        self.settings.theme = name
+        self.C = THEMES[name]
+        app = QApplication.instance()
+        if app is not None:
+            app.setPalette(build_palette(self.C))
+        # Re-apply the scoped card/button stylesheet on the themed tabs.
+        for tab in (self._history_tab, self._hotspot_tab):
+            tab.setStyleSheet(scoped_qss(self.C))
+        # Re-color the plots.
+        for plot in (self.plot, self.hist_plot):
+            plot.setBackground(self.C["plot_bg"])
+            for ax in ("left", "bottom"):
+                a = plot.getAxis(ax)
+                a.setPen(self.C["axis"])
+                a.setTextPen(self.C["axis_text"])
+        self._update_theme_button()
+        # Re-render views whose colors are set inline (banner, cap bar, cells).
+        self.refresh_history()
+        self._on_hotspot_sample(self.engine.latest_devices, self.engine.hotspot.status)
+        self.settings.save()
 
     # -- Live tab -----------------------------------------------------------
 
@@ -190,13 +200,17 @@ class DashboardWindow(QMainWindow):
 
         pg.setConfigOptions(antialias=True)
         self.plot = pg.PlotWidget()
-        self.plot.setBackground("#1e1e2e")
+        self.plot.setBackground(self.C["plot_bg"])
         self.plot.showGrid(x=True, y=True, alpha=0.2)
         self.plot.setLabel("left", "Throughput", units="B/s")
         self.plot.setLabel("bottom", "Time", units="s")
-        self.plot.addLegend()
+        self.plot.addLegend(labelTextColor=self.C["legend"])
         self._curve_down = self.plot.plot(pen=pg.mkPen(DOWN_COLOR, width=2), name="Download")
         self._curve_up = self.plot.plot(pen=pg.mkPen(UP_COLOR, width=2), name="Upload")
+        for _ax in ("left", "bottom"):
+            _a = self.plot.getAxis(_ax)
+            _a.setPen(self.C["axis"])
+            _a.setTextPen(self.C["axis_text"])
         layout.addWidget(self.plot, stretch=1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -233,7 +247,8 @@ class DashboardWindow(QMainWindow):
 
     def _build_history_tab(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(HISTORY_QSS)
+        w.setStyleSheet(scoped_qss(self.C))
+        self._history_tab = w
         layout = QVBoxLayout(w)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(14)
@@ -305,7 +320,7 @@ class DashboardWindow(QMainWindow):
         self.hist_plot = pg.PlotWidget(
             axisItems={"left": _ByteAxisItem(orientation="left")}
         )
-        self.hist_plot.setBackground("#1e1e2e")
+        self.hist_plot.setBackground(self.C["plot_bg"])
         self.hist_plot.showGrid(x=False, y=True, alpha=0.15)
         self.hist_plot.setMouseEnabled(x=False, y=False)
         self.hist_plot.setMenuEnabled(False)
@@ -313,8 +328,8 @@ class DashboardWindow(QMainWindow):
         self.hist_plot.setFixedHeight(190)
         for name in ("left", "bottom"):
             ax = self.hist_plot.getAxis(name)
-            ax.setPen("#44445c")
-            ax.setTextPen("#9090a8")
+            ax.setPen(self.C["axis"])
+            ax.setTextPen(self.C["axis_text"])
         layout.addWidget(self.hist_plot)
 
         bottom = QHBoxLayout()
@@ -417,17 +432,14 @@ class DashboardWindow(QMainWindow):
 
     def _build_hotspot_tab(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet(HISTORY_QSS)
+        w.setStyleSheet(scoped_qss(self.C))
+        self._hotspot_tab = w
         layout = QVBoxLayout(w)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
         self.hs_banner = QLabel("Mobile Hotspot is off.")
         self.hs_banner.setWordWrap(True)
-        self.hs_banner.setStyleSheet(
-            "background:#252539; border:1px solid #34344c; border-radius:8px;"
-            "padding:10px 14px; color:#c8c8dc; font-size:13px;"
-        )
         layout.addWidget(self.hs_banner)
 
         summary = QHBoxLayout()
@@ -534,8 +546,8 @@ class DashboardWindow(QMainWindow):
             banner_color, text = "#f1c40f", f"▲ {status}  (showing device presence only)"
         self.hs_banner.setText(text)
         self.hs_banner.setStyleSheet(
-            f"background:#252539; border:1px solid #34344c; border-radius:8px;"
-            f"padding:10px 14px; color:{banner_color}; font-size:13px;"
+            f"background:{self.C['panel']}; border:1px solid {self.C['border']};"
+            f"border-radius:8px; padding:10px 14px; color:{banner_color}; font-size:13px;"
         )
 
         # Cards always reflect currently-connected devices ("right now" stats).
