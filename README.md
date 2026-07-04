@@ -22,6 +22,8 @@ Built with Python + PyQt6 + pyqtgraph + psutil.
   (Usage requires admin + Npcap — see [Hotspot monitoring](#hotspot-monitoring).)
 - **Tray + dashboard** — lives in the system tray showing live speed in its
   tooltip; double-click (or use the menu) to open the full dashboard.
+- **Light / dark theme** — a sun/moon toggle at the right of the tab bar
+  switches themes; the choice is remembered.
 
 ## Setup
 
