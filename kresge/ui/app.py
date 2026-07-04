@@ -38,6 +38,9 @@ def run() -> int:
     app.setApplicationName("Kresge")
     # Keep running when the dashboard window is closed (we live in the tray).
     app.setQuitOnLastWindowClosed(False)
+    # Fusion renders our light/dark palette consistently regardless of the OS
+    # theme; the actual colors are applied once settings are loaded, below.
+    app.setStyle("Fusion")
 
     # Single-instance guard. Fast path: an existing instance answers, so hand
     # off the "show" request and exit. Otherwise claim the name ourselves.
@@ -60,6 +63,10 @@ def run() -> int:
         return 1
 
     settings = Settings.load()
+    # Apply the saved theme palette before any windows are built.
+    from .theme import THEMES, build_palette
+    app.setPalette(build_palette(THEMES.get(settings.theme, THEMES["dark"])))
+
     engine = MonitorEngine(settings)
     tray = TrayApp(app, engine, settings)
 
