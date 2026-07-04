@@ -46,6 +46,7 @@ class Settings:
     # UI
     start_minimized: bool = False           # launch straight to the tray
     units_bits: bool = False                # show speeds in bits (Mbps) instead of bytes (MB/s)
+    theme: str = "dark"                     # "dark" or "light"
 
     # History retention
     keep_minute_samples_days: int = 30      # prune per-minute history older than this
