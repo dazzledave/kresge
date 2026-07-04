@@ -279,20 +279,18 @@ class DashboardWindow(QMainWindow):
         toolbar.addWidget(legend)
         layout.addLayout(toolbar)
 
-        # Usage chart with a human-readable byte axis.
-        self.hist_plot = pg.PlotWidget(
-            axisItems={"left": _ByteAxisItem(orientation="left")}
-        )
-        self.hist_plot.setBackground("#1e1e2e")
-        self.hist_plot.showGrid(x=False, y=True, alpha=0.15)
-        self.hist_plot.setMouseEnabled(x=False, y=False)
-        self.hist_plot.setMenuEnabled(False)
-        self.hist_plot.hideButtons()
-        for name in ("left", "bottom"):
-            ax = self.hist_plot.getAxis(name)
-            ax.setPen("#44445c")
-            ax.setTextPen("#9090a8")
-        layout.addWidget(self.hist_plot, stretch=1)
+        # Per-period usage list (the main element), newest first.
+        self.hist_table = QTableWidget(0, 4)
+        self.hist_table.setHorizontalHeaderLabels(
+            ["Period", "Download", "Upload", "Total"])
+        self.hist_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.hist_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.hist_table.verticalHeader().setVisible(False)
+        hth = self.hist_table.horizontalHeader()
+        hth.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for i in (1, 2, 3):
+            hth.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.hist_table, stretch=1)
 
         # Empty-state placeholder, shown when there's no data yet.
         self.hist_placeholder = QLabel(
@@ -302,6 +300,22 @@ class DashboardWindow(QMainWindow):
         self.hist_placeholder.setStyleSheet("color: #6c6c84; font-size: 14px;")
         self.hist_placeholder.setVisible(False)
         layout.addWidget(self.hist_placeholder, stretch=1)
+
+        # Compact usage chart below the list (human-readable byte axis).
+        self.hist_plot = pg.PlotWidget(
+            axisItems={"left": _ByteAxisItem(orientation="left")}
+        )
+        self.hist_plot.setBackground("#1e1e2e")
+        self.hist_plot.showGrid(x=False, y=True, alpha=0.15)
+        self.hist_plot.setMouseEnabled(x=False, y=False)
+        self.hist_plot.setMenuEnabled(False)
+        self.hist_plot.hideButtons()
+        self.hist_plot.setFixedHeight(190)
+        for name in ("left", "bottom"):
+            ax = self.hist_plot.getAxis(name)
+            ax.setPen("#44445c")
+            ax.setTextPen("#9090a8")
+        layout.addWidget(self.hist_plot)
 
         bottom = QHBoxLayout()
         bottom.addStretch(1)
@@ -359,10 +373,25 @@ class DashboardWindow(QMainWindow):
         self.card_period.title.setText(title.upper())
         self.card_period.update_values(p_sent, p_recv)
 
-        self.hist_plot.clear()
         has_data = bool(rows)
+        self.hist_table.setVisible(has_data)
         self.hist_plot.setVisible(has_data)
         self.hist_placeholder.setVisible(not has_data)
+
+        # Per-period list, newest first.
+        self.hist_table.setRowCount(len(rows))
+        for i, (label, sent, recv) in enumerate(reversed(rows)):
+            self.hist_table.setItem(i, 0, QTableWidgetItem(label))
+            down = QTableWidgetItem(format_bytes(recv))
+            down.setForeground(QColor(DOWN_COLOR))
+            self.hist_table.setItem(i, 1, down)
+            up = QTableWidgetItem(format_bytes(sent))
+            up.setForeground(QColor(UP_COLOR))
+            self.hist_table.setItem(i, 2, up)
+            self.hist_table.setItem(i, 3, QTableWidgetItem(format_bytes(sent + recv)))
+
+        # Chart below the list (chronological, oldest left to newest right).
+        self.hist_plot.clear()
         if has_data:
             xs = list(range(len(rows)))
             sent = [r[1] for r in rows]
