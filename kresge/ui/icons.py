@@ -5,8 +5,12 @@ tray icon and the window icon.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap, QPolygonF
+import math
+
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import (
+    QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF,
+)
 
 
 def make_icon(size: int = 64, down_color: str = "#2ecc71", up_color: str = "#3498db") -> QIcon:
@@ -48,4 +52,54 @@ def make_icon(size: int = 64, down_color: str = "#2ecc71", up_color: str = "#349
     arrow(size * 0.64, up_color, pointing_down=False)
     p.end()
 
+    return QIcon(pm)
+
+
+def make_sun_icon(color: str = "#e8e8f0", size: int = 40) -> QIcon:
+    """A simple sun: filled disc with radiating rays."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    col = QColor(color)
+    cx = cy = size / 2
+    r = size * 0.15
+
+    p.setBrush(QBrush(col))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QPointF(cx, cy), r, r)
+
+    pen = QPen(col)
+    pen.setWidthF(max(1.6, size * 0.05))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    for k in range(8):
+        a = k * math.pi / 4
+        p.drawLine(
+            QPointF(cx + math.cos(a) * r * 1.7, cy + math.sin(a) * r * 1.7),
+            QPointF(cx + math.cos(a) * r * 2.4, cy + math.sin(a) * r * 2.4),
+        )
+    p.end()
+    return QIcon(pm)
+
+
+def make_moon_icon(color: str = "#e8e8f0", size: int = 40) -> QIcon:
+    """A crescent moon (a disc with an offset disc subtracted out)."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    r = size * 0.30
+    cx = size * 0.52
+    cy = size * 0.5
+    outer = QPainterPath()
+    outer.addEllipse(QPointF(cx, cy), r, r)
+    inner = QPainterPath()
+    inner.addEllipse(QPointF(cx + r * 0.55, cy - r * 0.25), r, r)
+
+    p.setBrush(QBrush(QColor(color)))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawPath(outer.subtracted(inner))
+    p.end()
     return QIcon(pm)
