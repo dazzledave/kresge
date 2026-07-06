@@ -395,7 +395,8 @@ class DashboardWindow(QMainWindow):
 
         # Per-period list, newest first.
         self.hist_table.setRowCount(len(rows))
-        for i, (label, sent, recv) in enumerate(reversed(rows)):
+        for i, row in enumerate(reversed(rows)):
+            label, sent, recv = row[0], row[1], row[2]
             self.hist_table.setItem(i, 0, QTableWidgetItem(label))
             down = QTableWidgetItem(format_bytes(recv))
             down.setForeground(QColor(DOWN_COLOR))
@@ -419,9 +420,10 @@ class DashboardWindow(QMainWindow):
                 x=[x + 0.2 for x in xs], height=sent, width=0.38,
                 brush=UP_COLOR, pen=None,
             ))
-            # Thin out x labels when crowded so they stay legible.
+            # Thin out x labels when crowded so they stay legible. Use the
+            # short label (chart axis) so week ranges don't overflow.
             step = max(1, len(rows) // 12)
-            ticks = [(i, rows[i][0]) for i in xs if i % step == 0]
+            ticks = [(i, rows[i][3]) for i in xs if i % step == 0]
             self.hist_plot.getAxis("bottom").setTicks([ticks])
             self.hist_plot.setXRange(-0.6, len(rows) - 0.4, padding=0)
 

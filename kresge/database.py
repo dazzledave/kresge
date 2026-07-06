@@ -152,12 +152,16 @@ class Database:
         )
         return cur.fetchone()
 
-    def usage_buckets(self, granularity: str, limit: int) -> list[tuple[str, int, int]]:
+    def usage_buckets(
+        self, granularity: str, limit: int
+    ) -> list[tuple[str, int, int, str]]:
         """Aggregate daily usage into day/week/month buckets for the history view.
 
         ``granularity`` is one of ``"day"``, ``"week"`` (Monday-started), or
-        ``"month"``. Returns ``(label, sent_bytes, recv_bytes)`` oldest first,
-        capped to the most recent ``limit`` buckets.
+        ``"month"``. Returns ``(label, sent_bytes, recv_bytes, short_label)``
+        oldest first, capped to the most recent ``limit`` buckets. ``label`` is
+        the full display text (a date range for weeks); ``short_label`` is a
+        compact form for chart axis ticks.
         """
         self._flush_minute()  # surface the latest in-progress data
         cur = self._conn.execute(
@@ -166,21 +170,28 @@ class Database:
         # dict preserves insertion order, and rows arrive chronologically.
         buckets: dict[str, list[int]] = {}
         labels: dict[str, str] = {}
+        shorts: dict[str, str] = {}
         for day_str, sent, recv in cur.fetchall():
             d = date.fromisoformat(day_str)
             if granularity == "week":
                 start = d - timedelta(days=d.weekday())   # Monday of that week
-                key, label = start.isoformat(), start.strftime("%b %d")
+                end = start + timedelta(days=6)           # Sunday
+                key = start.isoformat()
+                label = f"{start.strftime('%b %d')} – {end.strftime('%b %d')}"
+                short = start.strftime("%b %d")
             elif granularity == "month":
-                key, label = f"{d.year:04d}-{d.month:02d}", d.strftime("%b %Y")
+                key = f"{d.year:04d}-{d.month:02d}"
+                label = short = d.strftime("%b %Y")
             else:  # day
-                key, label = day_str, d.strftime("%b %d")
+                key = day_str
+                label = short = d.strftime("%b %d")
             acc = buckets.setdefault(key, [0, 0])
             acc[0] += sent
             acc[1] += recv
             labels[key] = label
+            shorts[key] = short
         recent = list(buckets.items())[-limit:]
-        return [(labels[k], v[0], v[1]) for k, v in recent]
+        return [(labels[k], v[0], v[1], shorts[k]) for k, v in recent]
 
     def total_usage(self) -> tuple[int, int]:
         cur = self._conn.execute(
