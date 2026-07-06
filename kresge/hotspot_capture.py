@@ -9,6 +9,12 @@ missing, :meth:`HotspotCapture.start` returns ``(False, reason)`` and the app
 falls back to Tier 1 (presence only) — capture is never required for the rest
 of the hotspot monitor to work.
 
+To keep up at high throughput we read **raw frames** (``recv_raw``) and parse
+just the source/destination IP out of the header bytes ourselves, instead of
+letting scapy dissect every packet into a full object (and re-serialize it via
+``len(pkt)``). That per-packet Python work is what caused npcap to drop packets
+and under-count fast devices.
+
 Scapy is imported lazily (inside methods) so a normal launch that never touches
 the hotspot feature doesn't pay its import cost or print its libpcap warning.
 """
@@ -17,6 +23,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import threading
+import time
 from collections import defaultdict
 
 DEFAULT_HOST_IP = "192.168.137.1"   # standard Windows ICS host address
@@ -43,8 +50,9 @@ class HotspotCapture:
         self._broadcast = self._prefix + "255"
         self._acc: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # ip -> [sent, recv]
         self._lock = threading.Lock()
-        self._sniffer = None
-        self._ip_layer = None
+        self._sock = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
         self.available = False
         self.status = "not started"
 
@@ -67,8 +75,7 @@ class HotspotCapture:
             return False, self.status
         try:
             logging.getLogger("scapy").setLevel(logging.ERROR)  # silence libpcap warning
-            from scapy.all import AsyncSniffer, conf
-            from scapy.layers.inet import IP
+            from scapy.all import conf
 
             if not getattr(conf, "use_pcap", False):
                 self.status = "Npcap not installed — install it to measure per-device usage."
@@ -79,11 +86,14 @@ class HotspotCapture:
                 self.status = "Hotspot interface not found (is Mobile Hotspot on?)."
                 return False, self.status
 
-            self._ip_layer = IP
-            self._sniffer = AsyncSniffer(
-                iface=iface, filter="ip", prn=self._on_packet, store=False
+            # Raw L2 listen socket (BPF filter to IPv4 only), read without
+            # dissection in a background thread.
+            self._sock = conf.L2listen(iface=iface, filter="ip")
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._capture_loop, name="hotspot-capture", daemon=True
             )
-            self._sniffer.start()
+            self._thread.start()
             self.available = True
             self.status = "Capturing per-device usage."
             return True, self.status
@@ -92,26 +102,48 @@ class HotspotCapture:
             return False, self.status
 
     def stop(self) -> None:
-        if self._sniffer is not None:
+        self._stop.set()
+        if self._sock is not None:
             try:
-                self._sniffer.stop()
+                self._sock.close()   # unblocks recv_raw() in the loop
             except Exception:
                 pass
-            self._sniffer = None
+            self._sock = None
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
         self.available = False
 
     # -- data ---------------------------------------------------------------
 
-    def _on_packet(self, pkt) -> None:
-        ip_layer = self._ip_layer
-        try:
-            if ip_layer not in pkt:
-                return
-            ip = pkt[ip_layer]
-            src, dst = ip.src, ip.dst
-            size = len(pkt)
-        except Exception:
+    def _capture_loop(self) -> None:
+        sock = self._sock
+        while not self._stop.is_set():
+            try:
+                data = sock.recv_raw()   # (LinkLayer, raw_bytes, timestamp)
+            except Exception:
+                if self._stop.is_set():
+                    break
+                time.sleep(0.02)   # avoid a busy-spin on transient errors
+                continue
+            raw = data[1] if isinstance(data, tuple) and len(data) >= 2 else None
+            if raw:
+                self._count(raw)
+
+    def _count(self, raw: bytes) -> None:
+        """Parse the src/dst IPv4 addresses out of a raw Ethernet frame and add
+        its size to the right client's counters. Frames are IPv4 (BPF filtered)."""
+        if len(raw) < 34:
             return
+        off = 14   # Ethernet II header
+        if raw[12] == 0x81 and raw[13] == 0x00:   # 802.1Q VLAN tag
+            off = 18
+            if len(raw) < off + 20:
+                return
+        si, di = off + 12, off + 16   # IPv4 header: src at +12, dst at +16
+        src = f"{raw[si]}.{raw[si + 1]}.{raw[si + 2]}.{raw[si + 3]}"
+        dst = f"{raw[di]}.{raw[di + 1]}.{raw[di + 2]}.{raw[di + 3]}"
+        size = len(raw)
         with self._lock:
             # A client IP appearing as source = it uploaded; as destination =
             # it downloaded. The host (.1) and broadcast are not devices.
