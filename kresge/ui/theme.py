@@ -57,6 +57,37 @@ def build_palette(c: dict) -> QPalette:
     return p
 
 
+def global_qss(c: dict) -> str:
+    """App-wide rounding for tables, headers, group boxes, and input boxes so
+    every framed element matches the rounded cards. Applied to the main window."""
+    return f"""
+    QTableView {{
+        border: 1px solid {c['border']}; border-radius: 8px;
+        background: {c['base']}; gridline-color: {c['border']};
+    }}
+    QHeaderView {{ background: transparent; }}
+    QHeaderView::section {{
+        background: {c['alt_base']}; color: {c['subtext']};
+        padding: 5px 8px; border: none; border-bottom: 1px solid {c['border']};
+    }}
+    QHeaderView::section:first {{ border-top-left-radius: 8px; }}
+    QHeaderView::section:last  {{ border-top-right-radius: 8px; }}
+    QTableCornerButton::section {{
+        background: {c['alt_base']}; border: none; border-top-left-radius: 8px;
+    }}
+    QGroupBox {{
+        border: 1px solid {c['border']}; border-radius: 10px; margin-top: 10px;
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin; left: 12px; padding: 0 5px; color: {c['subtext']};
+    }}
+    QSpinBox, QDoubleSpinBox, QLineEdit, QComboBox, QAbstractSpinBox {{
+        border: 1px solid {c['border']}; border-radius: 6px;
+        padding: 3px 6px; background: {c['base']};
+    }}
+    """
+
+
 def scoped_qss(c: dict) -> str:
     """Stylesheet for the custom cards/segmented-buttons/cap-bar (by objectName)."""
     return f"""

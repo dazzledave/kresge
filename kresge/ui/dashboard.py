@@ -23,7 +23,9 @@ from ..engine import MonitorEngine
 from ..process_monitor import ProcessUsage
 from ..sampler import Sample
 from .icons import make_icon, make_moon_icon, make_sun_icon
-from .theme import ACCENT, DOWN_COLOR, THEMES, UP_COLOR, build_palette, scoped_qss
+from .theme import (
+    ACCENT, DOWN_COLOR, THEMES, UP_COLOR, build_palette, global_qss, scoped_qss,
+)
 
 # Plain-language explanations shown by the ⓘ icons on the Settings tab.
 _INFO = {
@@ -120,6 +122,7 @@ class DashboardWindow(QMainWindow):
         self.C = THEMES.get(settings.theme, THEMES["dark"])   # active theme colors
         self.setWindowTitle("Kresge — Network Monitor")
         self.setWindowIcon(make_icon())
+        self.setStyleSheet(global_qss(self.C))   # rounded tables/boxes app-wide
         self.resize(940, 680)
 
         # rolling buffers for the live chart
@@ -169,6 +172,7 @@ class DashboardWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setPalette(build_palette(self.C))
+        self.setStyleSheet(global_qss(self.C))   # rounded tables/boxes
         # Re-apply the scoped card/button stylesheet on the themed tabs.
         for tab in (self._history_tab, self._hotspot_tab):
             tab.setStyleSheet(scoped_qss(self.C))
