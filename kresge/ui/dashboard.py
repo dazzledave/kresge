@@ -26,6 +26,7 @@ from .icons import make_icon, make_moon_icon, make_sun_icon
 from .theme import (
     ACCENT, DOWN_COLOR, THEMES, UP_COLOR, build_palette, global_qss, scoped_qss,
 )
+from .tools import ToolsTab
 
 # Plain-language explanations shown by the ⓘ icons on the Settings tab.
 _INFO = {
@@ -138,6 +139,8 @@ class DashboardWindow(QMainWindow):
         tabs.addTab(self._build_live_tab(), "Live")
         tabs.addTab(self._build_history_tab(), "History")
         tabs.addTab(self._build_hotspot_tab(), "Hotspot")
+        self._tools_tab = ToolsTab(self.C)
+        tabs.addTab(self._tools_tab, "Tools")
         tabs.addTab(self._build_settings_tab(), "Settings")
         self.setCentralWidget(tabs)
 
@@ -176,6 +179,7 @@ class DashboardWindow(QMainWindow):
         # Re-apply the scoped card/button stylesheet on the themed tabs.
         for tab in (self._history_tab, self._hotspot_tab):
             tab.setStyleSheet(scoped_qss(self.C))
+        self._tools_tab.apply_theme(self.C)
         # Re-color the plots.
         for plot in (self.plot, self.hist_plot):
             plot.setBackground(self.C["plot_bg"])
