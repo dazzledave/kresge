@@ -85,6 +85,10 @@ def global_qss(c: dict) -> str:
         border: 1px solid {c['border']}; border-radius: 6px;
         padding: 3px 6px; background: {c['base']};
     }}
+    QPlainTextEdit, QTextEdit {{
+        border: 1px solid {c['border']}; border-radius: 8px;
+        background: {c['base']}; padding: 6px;
+    }}
     """
 
 
