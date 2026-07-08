@@ -24,6 +24,8 @@ Built with Python + PyQt6 + pyqtgraph + psutil.
   tooltip; double-click (or use the menu) to open the full dashboard.
 - **Light / dark theme** — a sun/moon toggle at the right of the tab bar
   switches themes; the choice is remembered.
+- **Network tools** — a Tools tab with ping, traceroute, DNS lookup, port
+  check, public-IP lookup, and full `ipconfig`, with live streaming output.
 
 ## Setup
 
@@ -148,9 +150,11 @@ kresge/
   engine.py              Timer-driven engine; emits Qt signals
   ui/
     dashboard.py         Live charts, tables, history, hotspot, settings
+    tools.py             Network tools tab (ping/traceroute/DNS/ports/…)
+    theme.py             Light/dark palettes + rounded-widget stylesheets
     tray.py              System-tray icon + notifications
     app.py               Application bootstrap
-    icons.py             Programmatically drawn app icon
+    icons.py             Programmatically drawn app + sun/moon icons
 ```
 
 ## Notes
