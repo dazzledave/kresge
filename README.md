@@ -157,8 +157,3 @@ kresge/
     icons.py             Programmatically drawn app + sun/moon icons
 ```
 
-## Notes
-
-- Loopback interfaces are excluded from totals.
-- Counters that reset (e.g. an interface restart) are clamped so speeds never
-  go negative.

@@ -137,15 +137,30 @@ class ToolsTab(QWidget):
 
     # -- run / stop ---------------------------------------------------------
 
+    @staticmethod
+    def _clean_target(raw: str) -> str:
+        """Turn a pasted URL into a bare host, e.g. https://x.com/p -> x.com."""
+        t = raw.strip()
+        for scheme in ("http://", "https://", "ftp://"):
+            if t.lower().startswith(scheme):
+                t = t[len(scheme):]
+        t = t.split("/", 1)[0].split("?", 1)[0].strip()
+        return t
+
     def _start(self) -> None:
         if self._thread and self._thread.is_alive():
+            self.console.appendPlainText("• A tool is still running — press Stop first.")
             return
         tool = self._current_tool()
         needs_target = _TOOLS[tool][0]
-        target = self.target.text().strip()
+        target = self._clean_target(self.target.text())
         if needs_target and not target:
             self.console.appendPlainText("• Enter a target first.")
             return
+
+        # Read widget state here on the GUI thread; the worker must not touch widgets.
+        continuous = self.cont.isChecked()
+        ports_text = self.port.text().strip()
 
         self._cancel = False
         self.run_btn.setEnabled(False)
@@ -153,7 +168,9 @@ class ToolsTab(QWidget):
         self.console.appendPlainText(
             f"\n$ {tool}{(' ' + target) if target else ''}\n" + "─" * 40)
         self._thread = threading.Thread(
-            target=self._work, args=(tool, target), daemon=True)
+            target=self._work, args=(tool, target, continuous, ports_text),
+            daemon=True,
+        )
         self._thread.start()
 
     def _stop(self) -> None:
@@ -170,10 +187,10 @@ class ToolsTab(QWidget):
 
     # -- workers (run on the background thread) -----------------------------
 
-    def _work(self, tool: str, target: str) -> None:
+    def _work(self, tool: str, target: str, continuous: bool, ports_text: str) -> None:
         try:
             if tool == "Ping":
-                args = ["ping", "-t", target] if self.cont.isChecked() else ["ping", "-n", "4", target]
+                args = ["ping", "-t", target] if continuous else ["ping", "-n", "4", target]
                 self._run_proc(args)
             elif tool == "Traceroute":
                 self._run_proc(["tracert", "-h", "30", target])
@@ -182,7 +199,7 @@ class ToolsTab(QWidget):
             elif tool == "IP Config":
                 self._run_proc(["ipconfig", "/all"])
             elif tool == "Port Check":
-                self._port_check(target)
+                self._port_check(target, ports_text)
             elif tool == "Public IP":
                 self._public_ip()
         except Exception as exc:            # never let the worker die silently
@@ -233,10 +250,9 @@ class ToolsTab(QWidget):
         self._line.emit("")
         self._run_proc(["nslookup", host])
 
-    def _port_check(self, host: str) -> None:
-        text = self.port.text().strip()
-        if text:
-            ports = [int(p) for p in re.split(r"[,\s]+", text) if p.isdigit()]
+    def _port_check(self, host: str, ports_text: str) -> None:
+        if ports_text:
+            ports = [int(p) for p in re.split(r"[,\s]+", ports_text) if p.isdigit()]
         else:
             ports = _DEFAULT_PORTS
         self._line.emit(f"Scanning {len(ports)} port(s) on {host} …")
