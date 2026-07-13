@@ -1,16 +1,33 @@
-"""Programmatically drawn icons so the app ships with no binary assets.
+"""Icons for the app.
 
-A small upload/download arrow glyph is painted onto a QPixmap. Used for the
-tray icon and the window icon.
+The window/tray icon is loaded from ``assets/logo.png`` when present, otherwise
+a programmatically drawn glyph is used as a fallback. The sun/moon theme-toggle
+icons are always drawn in code.
 """
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import (
     QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF,
 )
+
+_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo.png"
+
+
+def app_icon() -> QIcon:
+    """The application/window/tray icon.
+
+    Loads ``kresge/ui/assets/logo.png`` if it exists; falls back to the drawn
+    up/down arrow glyph so the app always has an icon.
+    """
+    if _LOGO_PATH.exists():
+        icon = QIcon(str(_LOGO_PATH))
+        if not icon.isNull():
+            return icon
+    return make_icon()
 
 
 def make_icon(size: int = 64, down_color: str = "#2ecc71", up_color: str = "#3498db") -> QIcon:
