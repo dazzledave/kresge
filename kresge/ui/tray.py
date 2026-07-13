@@ -10,7 +10,7 @@ from ..config import Settings, format_rate
 from ..engine import MonitorEngine
 from ..sampler import Sample
 from .dashboard import DashboardWindow
-from .icons import make_icon
+from .icons import app_icon
 
 _LEVEL_ICON = {
     AlertLevel.INFO: QSystemTrayIcon.MessageIcon.Information,
@@ -29,7 +29,7 @@ class TrayApp:
 
         self.window = DashboardWindow(engine, settings)
 
-        self.tray = QSystemTrayIcon(make_icon())
+        self.tray = QSystemTrayIcon(app_icon())
         self.tray.setToolTip("Kresge — starting…")
         self.tray.setContextMenu(self._build_menu())
         self.tray.activated.connect(self._on_activated)
