@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from ..config import Settings
 from ..engine import MonitorEngine
+from .icons import app_icon
 from .tray import TrayApp
 
 # Per-user unique name so the guard works across separate logins on one machine.
@@ -34,8 +35,17 @@ def _activate_running_instance() -> bool:
 
 
 def run() -> int:
+    # Give Windows an explicit app id so the taskbar shows our own icon
+    # (not the generic pythonw.exe icon) and groups the app under "Kresge".
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Kresge.NetworkMonitor")
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     app.setApplicationName("Kresge")
+    app.setWindowIcon(app_icon())   # default icon for all windows/dialogs
     # Keep running when the dashboard window is closed (we live in the tray).
     app.setQuitOnLastWindowClosed(False)
     # Fusion renders our light/dark palette consistently regardless of the OS
