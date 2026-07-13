@@ -22,7 +22,7 @@ from ..config import Settings, format_bytes, format_rate
 from ..engine import MonitorEngine
 from ..process_monitor import ProcessUsage
 from ..sampler import Sample
-from .icons import make_icon, make_moon_icon, make_sun_icon
+from .icons import app_icon, make_moon_icon, make_sun_icon
 from .theme import (
     ACCENT, DOWN_COLOR, THEMES, UP_COLOR, build_palette, global_qss, scoped_qss,
 )
@@ -122,7 +122,7 @@ class DashboardWindow(QMainWindow):
         self.settings = settings
         self.C = THEMES.get(settings.theme, THEMES["dark"])   # active theme colors
         self.setWindowTitle("Kresge — Network Monitor")
-        self.setWindowIcon(make_icon())
+        self.setWindowIcon(app_icon())
         self.setStyleSheet(global_qss(self.C))   # rounded tables/boxes app-wide
         self.resize(940, 680)
 
