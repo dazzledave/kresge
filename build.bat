@@ -27,7 +27,7 @@ echo ============================================================
 echo  Build complete:  dist\Kresge.exe
 echo ============================================================
 echo  Note: per-device hotspot usage still needs the Npcap driver
-echo  installed on the target PC, and Administrator rights (right-
-echo  click Kresge.exe -> Run as administrator) for capture/blocking.
+echo  installed on the target PC, and Administrator rights ^(right-
+echo  click Kresge.exe, Run as administrator^) for capture/blocking.
 echo.
 pause

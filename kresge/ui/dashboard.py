@@ -121,7 +121,7 @@ class DashboardWindow(QMainWindow):
         self.engine = engine
         self.settings = settings
         self.C = THEMES.get(settings.theme, THEMES["dark"])   # active theme colors
-        self.setWindowTitle("Kresge — Network Monitor")
+        self.setWindowTitle("Kresge - Network Monitor")
         self.setWindowIcon(app_icon())
         self.setStyleSheet(global_qss(self.C))   # rounded tables/boxes app-wide
         self.resize(940, 680)

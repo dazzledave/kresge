@@ -51,6 +51,30 @@ Or just double-click **`run.bat`**, which launches it without a console window
 - Closing the window hides it to the tray — it keeps monitoring.
 - Right-click the tray icon → **Quit** to fully exit.
 
+## Building a standalone executable
+
+Kresge can be packaged into a single `Kresge.exe` with [PyInstaller](https://pyinstaller.org):
+
+```powershell
+.venv\Scripts\python -m pip install pyinstaller pillow
+.\build.bat
+```
+
+`build.bat` produces **`dist\Kresge.exe`** — a single ~70 MB file you can copy
+to any Windows PC; no Python install required. It bundles scapy, the WinRT
+bindings, the logo, and all dependencies, and embeds the logo as the exe icon.
+
+The build uses these key flags (see `build.bat`): `--onefile --windowed`
+(single, no-console GUI app), `--collect-all scapy` / `--collect-all winsdk`
+(their data files and dynamic modules), and `--add-data` for the logo.
+
+On the target PC:
+- **Live speed, history, per-process, device list, and network tools** work out
+  of the box.
+- **Per-device hotspot usage/blocking** still needs the **[Npcap](https://npcap.com)**
+  driver installed and the exe run **as Administrator** (right-click → Run as
+  administrator).
+
 ## Configuration
 
 All settings are editable in the **Settings** tab and persisted to
@@ -154,6 +178,7 @@ kresge/
     theme.py             Light/dark palettes + rounded-widget stylesheets
     tray.py              System-tray icon + notifications
     app.py               Application bootstrap
-    icons.py             Programmatically drawn app + sun/moon icons
+    icons.py             Loads assets/logo.png (drawn fallback) + sun/moon icons
+    assets/logo.png      App / window / tray / taskbar icon
 ```
 

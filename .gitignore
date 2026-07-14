@@ -16,3 +16,6 @@ venv/
 
 # test files
 validate-block.ps1
+
+
+build_log.txt
