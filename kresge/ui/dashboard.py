@@ -142,6 +142,7 @@ class DashboardWindow(QMainWindow):
         self._tools_tab = ToolsTab(self.C)
         tabs.addTab(self._tools_tab, "Tools")
         tabs.addTab(self._build_settings_tab(), "Settings")
+        tabs.addTab(self._build_about_tab(), "About")
         self.setCentralWidget(tabs)
 
         # Theme toggle (sun/moon) at the far right of the tab bar.
@@ -177,7 +178,7 @@ class DashboardWindow(QMainWindow):
             app.setPalette(build_palette(self.C))
         self.setStyleSheet(global_qss(self.C))   # rounded tables/boxes
         # Re-apply the scoped card/button stylesheet on the themed tabs.
-        for tab in (self._history_tab, self._hotspot_tab):
+        for tab in (self._history_tab, self._hotspot_tab, self._about_tab):
             tab.setStyleSheet(scoped_qss(self.C))
         self._tools_tab.apply_theme(self.C)
         # Re-color the plots.
@@ -690,6 +691,95 @@ class DashboardWindow(QMainWindow):
         else:
             self.engine.hotspot.unblock_device(mac)
         self._on_hotspot_sample(self.engine.latest_devices, self.engine.hotspot.status)
+
+    # -- About tab ----------------------------------------------------------
+
+    def _build_about_tab(self) -> QWidget:
+        import platform
+        from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR
+
+        from .. import __version__
+
+        w = QWidget()
+        w.setStyleSheet(scoped_qss(self.C))
+        self._about_tab = w
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(24, 24, 24, 24)
+        outer.addStretch(2)
+
+        logo = QLabel()
+        logo.setPixmap(app_icon().pixmap(96, 96))
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.addWidget(logo)
+
+        title = QLabel("Kresge")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 30px; font-weight: 800;")
+        outer.addWidget(title)
+
+        subtitle = QLabel("Network Monitor")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("font-size: 15px; color: #8c8ca6;")
+        outer.addWidget(subtitle)
+
+        ver = QLabel(f"Version {__version__}")
+        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ver.setStyleSheet("color: #8c8ca6; font-size: 12px;")
+        outer.addWidget(ver)
+
+        outer.addSpacing(14)
+        desc = QLabel(
+            "A real-time network monitoring tool for Windows: live upload/"
+            "download speed, per-process bandwidth, connected hotspot devices "
+            "and their usage, historical logging, data-cap alerts, and built-in "
+            "network diagnostics."
+        )
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setMaximumWidth(540)
+        drow = QHBoxLayout()
+        drow.addStretch(1)
+        drow.addWidget(desc)
+        drow.addStretch(1)
+        outer.addLayout(drow)
+
+        outer.addSpacing(18)
+        card = QFrame()
+        card.setObjectName("histCard")
+        card.setMaximumWidth(540)
+        form = QFormLayout(card)
+        form.setContentsMargins(20, 16, 20, 16)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(6)
+
+        def add_row(key: str, value: str) -> None:
+            kl = QLabel(key)
+            kl.setStyleSheet("color: #8c8ca6;")
+            form.addRow(kl, QLabel(value))
+
+        add_row("Built with", "PyQt6 · pyqtgraph · psutil · scapy · WinRT · SQLite")
+        add_row("Python", platform.python_version())
+        add_row("Qt / PyQt6", f"{QT_VERSION_STR} / {PYQT_VERSION_STR}")
+        add_row("System", platform.platform())
+        crow = QHBoxLayout()
+        crow.addStretch(1)
+        crow.addWidget(card)
+        crow.addStretch(1)
+        outer.addLayout(crow)
+
+        outer.addStretch(3)
+        credit = QLabel(
+            f"Developed by <a href='https://github.com/dazzledave' "
+            f"style='color:{ACCENT}; text-decoration:none;'>dazzledave</a>"
+        )
+        credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit.setOpenExternalLinks(True)   # opens the GitHub link in the browser
+        credit.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        credit.setCursor(Qt.CursorShape.PointingHandCursor)
+        credit.setStyleSheet("color: #8c8ca6; font-size: 12px;")
+        outer.addWidget(credit)
+        outer.addSpacing(40)   # lift the credit off the very bottom edge
+        return w
 
     # -- Settings tab -------------------------------------------------------
 
