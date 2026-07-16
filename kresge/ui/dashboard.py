@@ -8,8 +8,8 @@ import time
 from collections import deque
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QCursor
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QCursor, QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDoubleSpinBox, QFormLayout, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
@@ -116,6 +116,10 @@ class _StatCard(QGroupBox):
 
 
 class DashboardWindow(QMainWindow):
+    # Emitted from the background Npcap-install thread (delivered on the UI thread).
+    _npcap_status = pyqtSignal(str)
+    _npcap_done = pyqtSignal(bool, str)
+
     def __init__(self, engine: MonitorEngine, settings: Settings) -> None:
         super().__init__()
         self.engine = engine
@@ -156,6 +160,8 @@ class DashboardWindow(QMainWindow):
 
         engine.sampleReady.connect(self._on_sample)
         engine.hotspotSample.connect(self._on_hotspot_sample)
+        self._npcap_status.connect(self._on_npcap_status)
+        self._npcap_done.connect(self._on_npcap_done)
 
     # -- Theme --------------------------------------------------------------
 
@@ -453,6 +459,24 @@ class DashboardWindow(QMainWindow):
         self.hs_banner.setWordWrap(True)
         layout.addWidget(self.hs_banner)
 
+        # "Install Npcap" prompt — only shown when the driver is missing.
+        npcap_row = QHBoxLayout()
+        self.hs_npcap_msg = QLabel(
+            "Per-device usage needs the Npcap driver, which isn't installed.")
+        self.hs_npcap_msg.setStyleSheet("color:#8c8ca6; font-size:12px;")
+        npcap_row.addWidget(self.hs_npcap_msg)
+        npcap_row.addStretch(1)
+        self.hs_npcap_btn = QPushButton("Install Npcap")
+        self.hs_npcap_btn.setObjectName("segBtn")
+        self.hs_npcap_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hs_npcap_btn.clicked.connect(self._install_npcap)
+        npcap_row.addWidget(self.hs_npcap_btn)
+        self.hs_npcap_widget = QWidget()
+        self.hs_npcap_widget.setLayout(npcap_row)
+        from ..npcap import npcap_installed
+        self.hs_npcap_widget.setVisible(not npcap_installed())
+        layout.addWidget(self.hs_npcap_widget)
+
         summary = QHBoxLayout()
         summary.setSpacing(12)
         self.hs_card_count = _HistoryCard("CONNECTED DEVICES")
@@ -691,6 +715,44 @@ class DashboardWindow(QMainWindow):
         else:
             self.engine.hotspot.unblock_device(mac)
         self._on_hotspot_sample(self.engine.latest_devices, self.engine.hotspot.status)
+
+    # -- Npcap install ------------------------------------------------------
+
+    def _install_npcap(self) -> None:
+        from ..npcap import NPCAP_VERSION
+        ok = QMessageBox.question(
+            self, "Install Npcap",
+            f"Kresge will download Npcap {NPCAP_VERSION} from npcap.com and "
+            "install it. Windows may show a security (UAC) prompt — approve it "
+            "to continue.\n\nInstall now?",
+        )
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+        self.hs_npcap_btn.setEnabled(False)
+        self.hs_npcap_btn.setText("Installing…")
+        import threading
+        threading.Thread(target=self._npcap_worker, daemon=True).start()
+
+    def _npcap_worker(self) -> None:
+        from .. import npcap
+        ok, message = npcap.install(self._npcap_status.emit)
+        self._npcap_done.emit(ok, message)
+
+    def _on_npcap_status(self, msg: str) -> None:
+        self.hs_npcap_msg.setText(msg)
+
+    def _on_npcap_done(self, ok: bool, message: str) -> None:
+        self.hs_npcap_btn.setEnabled(True)
+        self.hs_npcap_btn.setText("Install Npcap")
+        if ok:
+            self.hs_npcap_msg.setText(message)
+            self.hs_npcap_btn.setVisible(False)
+            QMessageBox.information(self, "Npcap installed", message)
+        else:
+            QMessageBox.warning(self, "Npcap", message)
+            # On failure, fall back to the official download page.
+            from ..npcap import NPCAP_PAGE
+            QDesktopServices.openUrl(QUrl(NPCAP_PAGE))
 
     # -- About tab ----------------------------------------------------------
 
