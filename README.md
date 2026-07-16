@@ -20,42 +20,70 @@ Live speed · per-process bandwidth · hotspot device control · usage history �
   </a>
 </p>
 
-<a href="https://github.com/dazzledave/kresge/releases/tag/v0.2.0">
-  <img alt="Download Kresge v0.2.0" src="https://img.shields.io/badge/Download%20Kresge-v0.2.0-8CB000?style=for-the-badge&logo=windows&logoColor=white&labelColor=24292e">
+<a href="https://github.com/dazzledave/kresge/releases/latest">
+  <img alt="Download Kresge" src="https://img.shields.io/github/v/release/dazzledave/kresge?style=for-the-badge&logo=windows&logoColor=white&label=Download%20Kresge&color=8CB000&labelColor=24292e">
 </a>
 
 <sub>Single <code>.exe</code> · no Python required · Windows 10 / 11</sub>
+
+<br><br>
+
+<img src="docs/screenshots/live.png" alt="Kresge live dashboard" width="900">
 
 </div>
 
 ---
 
-## ✨ Features
+## Features
 
-- 📊 **Live throughput** — real-time up/down speed per interface, with a rolling chart and headline speed cards.
-- 🧩 **Per-process usage** — see which apps are moving data. <sub>(Estimated — [why?](#-how-per-process-attribution-works))</sub>
-- 📡 **Hotspot monitor** — see every device on your Windows Mobile Hotspot (name, vendor, IP, MAC) **and how much data each one uses**.
-- 🚦 **Per-device limits & blocking** — give a device a data cap, or cut it off the hotspot in one click.
-- 🗓 **Usage history** — logged to SQLite; browse by **day, week, or month** with totals and trend charts.
-- 🔔 **Alerts & data caps** — monthly cap with early warning, sustained high-usage and bandwidth-hog alerts, as native Windows notifications.
-- 🛠 **Network tools** — ping, traceroute, DNS lookup, port scanner, public IP, and `ipconfig`, with live streaming output.
-- 🌗 **Light & dark theme** — a sun/moon toggle in the tab bar; your choice is remembered.
-- 🖥 **Tray + dashboard** — lives in the system tray showing live speed; double-click for the full dashboard.
+- **Live throughput** — real-time up/down speed per interface, with a rolling chart and headline speed cards.
+- **Per-process usage** — see which apps are moving data. <sub>(Estimated — [why?](#how-per-process-attribution-works))</sub>
+- **Hotspot monitor** — see every device on your Windows Mobile Hotspot (name, vendor, IP, MAC) **and how much data each one uses**.
+- **Per-device limits and blocking** — give a device a data cap, or cut it off the hotspot in one click.
+- **Usage history** — logged to SQLite; browse by **day, week, or month** with totals and trend charts.
+- **Alerts and data caps** — monthly cap with early warning, sustained high-usage and bandwidth-hog alerts, as native Windows notifications.
+- **Network tools** — ping, traceroute, DNS lookup, port scanner, public IP, and `ipconfig`, with live streaming output.
+- **Light and dark theme** — a sun/moon toggle in the tab bar; your choice is remembered.
+- **Tray and dashboard** — lives in the system tray showing live speed; double-click for the full dashboard.
 
 ---
 
-## 🚀 Quick start
+## Quick start
 
-**[⬇ Download the latest release](https://github.com/dazzledave/kresge/releases/tag/v0.2.0)**, unzip if needed, and run **`Kresge.exe`**. That's it — no Python, no installer.
+**[Download the latest release](https://github.com/dazzledave/kresge/releases/latest)**, then run **`Kresge.exe`**. That's it — no Python, no installer.
 
 > [!TIP]
-> For **per-device hotspot usage** and **blocking**, right-click `Kresge.exe` → **Run as administrator**. If the Npcap driver is missing, the Hotspot tab offers a one-click **Install Npcap** button.
+> For **per-device hotspot usage** and **blocking**, right-click `Kresge.exe` and choose **Run as administrator**. If the Npcap driver is missing, the Hotspot tab offers a one-click **Install Npcap** button.
 
 Everything else — live speed, history, per-process, the device list, and the network tools — works out of the box.
 
 ---
 
-## 🧑‍💻 Running from source
+## Screenshots
+
+<div align="center">
+
+**Hotspot — per-device usage, data limits, and blocking**
+
+<img src="docs/screenshots/hotspot.png" alt="Hotspot tab" width="880">
+
+<br>
+
+**History — group usage by day, week, or month**
+
+<img src="docs/screenshots/history.png" alt="History tab" width="880">
+
+<br>
+
+**Tools — ping, traceroute, DNS, port scan, and more**
+
+<img src="docs/screenshots/tools.png" alt="Tools tab" width="880">
+
+</div>
+
+---
+
+## Running from source
 
 Requires **Python 3.10+**.
 
@@ -71,7 +99,7 @@ Or double-click **`run.bat`** (no console window), or **`run-admin.bat`** to run
 
 - The dashboard opens on launch (unless **Start minimized** is enabled in Settings).
 - Closing the window hides it to the tray — it keeps monitoring.
-- Right-click the tray icon → **Quit** to fully exit.
+- Right-click the tray icon and choose **Quit** to fully exit.
 
 ### Building the executable
 
@@ -84,9 +112,9 @@ Produces **`dist\Kresge.exe`** — a single ~70 MB file that runs on any Windows
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-Settings live in the **Settings** tab (each has an ⓘ explaining it) and persist to `%LOCALAPPDATA%\Kresge\config.json`.
+Settings live in the **Settings** tab (each has an info icon explaining it) and persist to `%LOCALAPPDATA%\Kresge\config.json`.
 
 | Setting | Meaning |
 | --- | --- |
@@ -102,7 +130,7 @@ History lives in `%LOCALAPPDATA%\Kresge\history.db`. Per-minute samples are prun
 
 ---
 
-## 📡 Hotspot monitoring
+## Hotspot monitoring
 
 The **Hotspot** tab shows the devices *currently* connected to your Windows Mobile Hotspot, with per-device usage. It works in two tiers:
 
@@ -113,7 +141,7 @@ When Npcap is missing, the tab shows an **Install Npcap** button that downloads 
 
 **Connected / All devices** toggles between who's online now and a history of every device ever seen, with **lifetime totals** and last-connected times.
 
-**Per-device limits & blocking** — right-click any device to:
+**Per-device limits and blocking** — right-click any device to:
 - **Set a session data limit** — a per-connection cap. Cross it and you get a notification, and the device is automatically cut off until it reconnects or you clear the limit.
 - **Block / unblock** — cut a device off instantly, or restore it.
 
@@ -132,7 +160,7 @@ It's a **traffic block, not a Wi-Fi deauth**, is fully reversible, and requires 
 
 ---
 
-## 🧩 How per-process attribution works
+## How per-process attribution works
 
 Windows doesn't expose exact per-process network byte counters through any unprivileged, cross-platform API. Kresge estimates per-process usage by distributing measured total throughput across each process's active TCP/UDP connections. Great for spotting *which* app is hogging bandwidth; the byte figures are approximate.
 
@@ -140,7 +168,7 @@ Byte-accurate per-process numbers would need an Administrator [ETW](https://lear
 
 ---
 
-## 🗂 Project layout
+## Project layout
 
 <details>
 <summary><b>Show the file map</b></summary>
@@ -181,8 +209,8 @@ kresge/
 
 Developed by **[dazzledave](https://github.com/dazzledave)**
 
-<a href="https://github.com/dazzledave/kresge/releases/tag/v0.2.0">
-  <img alt="Download Kresge" src="https://img.shields.io/badge/Download%20Kresge-v0.2.0-8CB000?style=for-the-badge&logo=windows&logoColor=white&labelColor=24292e">
+<a href="https://github.com/dazzledave/kresge/releases/latest">
+  <img alt="Download Kresge" src="https://img.shields.io/github/v/release/dazzledave/kresge?style=for-the-badge&logo=windows&logoColor=white&label=Download%20Kresge&color=8CB000&labelColor=24292e">
 </a>
 
 </div>
