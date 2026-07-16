@@ -130,6 +130,11 @@ Mobile Hotspot, with their per-device usage. It works in two tiers:
   explains what's missing. The sniffer is isolated in
   `kresge/hotspot_capture.py`, so usage is never required for the list to work.
 
+  When Npcap is missing, the Hotspot tab shows an **"Install Npcap"** button that
+  downloads the official installer from npcap.com and installs it silently with
+  the safe flags (no raw-802.11). Kresge does not bundle/redistribute Npcap — it
+  fetches it from the official source at runtime.
+
 The tab has a **Connected / All devices** toggle: "Connected" shows who's on the
 hotspot right now, while "All devices" is a history view of every device ever
 seen — including offline ones, with their **lifetime totals** and when they were

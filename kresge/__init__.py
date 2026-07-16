@@ -5,5 +5,5 @@ historical record in SQLite, and raises alerts for data caps and bandwidth
 hogs. Ships as a system-tray app with a full dashboard window.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["__version__"]
